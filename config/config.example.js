@@ -73,6 +73,9 @@ const config = {
   proxy: {
     timeout: parseInt(process.env.DEFAULT_PROXY_TIMEOUT) || 600000, // 10分钟
     maxRetries: parseInt(process.env.MAX_PROXY_RETRIES) || 3,
+    // 默认代理地址（账户可在表单中选择「使用默认代理」，前端不显示实际地址）
+    // 格式: socks5://user:pass@host:port 或 http://host:port
+    defaultProxyUrl: process.env.DEFAULT_PROXY_URL || '',
     // 连接池与 Keep-Alive 配置（默认关闭，需要显式开启）
     keepAlive: (() => {
       if (process.env.PROXY_KEEP_ALIVE === undefined || process.env.PROXY_KEEP_ALIVE === '') {

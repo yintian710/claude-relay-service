@@ -4165,6 +4165,7 @@ const determinePlatformGroup = (platform) => {
 
 const createDefaultProxyState = () => ({
   enabled: false,
+  useDefault: false,
   type: 'socks5',
   host: '',
   port: '',
@@ -4197,6 +4198,11 @@ const parseProxyResponse = (rawProxy) => {
 
   if (!proxyObject || typeof proxyObject !== 'object') {
     return null
+  }
+
+  // 「使用默认代理」标记
+  if (proxyObject.useDefault) {
+    return { useDefault: true }
   }
 
   const host =
@@ -4242,9 +4248,22 @@ const parseProxyResponse = (rawProxy) => {
 const normalizeProxyFormState = (rawProxy) => {
   const parsed = parseProxyResponse(rawProxy)
 
+  if (parsed && parsed.useDefault) {
+    return {
+      enabled: true,
+      useDefault: true,
+      type: 'socks5',
+      host: '',
+      port: '',
+      username: '',
+      password: ''
+    }
+  }
+
   if (parsed && parsed.host && parsed.port) {
     return {
       enabled: true,
+      useDefault: false,
       type: parsed.type || 'socks5',
       host: parsed.host,
       port: parsed.port,
@@ -4259,6 +4278,11 @@ const normalizeProxyFormState = (rawProxy) => {
 const buildProxyPayload = (proxyState) => {
   if (!proxyState || !proxyState.enabled) {
     return null
+  }
+
+  // 使用默认代理：仅存储标记，实际地址在服务端运行时解析
+  if (proxyState.useDefault) {
+    return { useDefault: true }
   }
 
   const host = (proxyState.host || '').trim()

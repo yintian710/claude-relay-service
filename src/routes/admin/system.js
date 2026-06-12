@@ -8,6 +8,7 @@ const redis = require('../../models/redis')
 const { authenticateAdmin } = require('../../middleware/auth')
 const logger = require('../../utils/logger')
 const config = require('../../../config/config')
+const ProxyHelper = require('../../utils/proxyHelper')
 
 const router = express.Router()
 
@@ -379,6 +380,23 @@ router.get('/claude-code-version', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get User-Agent information',
+      error: error.message
+    })
+  }
+})
+
+// 🌐 获取默认代理配置状态（不返回实际地址，仅告知是否已配置）
+router.get('/proxy/default-status', authenticateAdmin, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      configured: ProxyHelper.isDefaultProxyConfigured()
+    })
+  } catch (error) {
+    logger.error('❌ Get default proxy status error:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get default proxy status',
       error: error.message
     })
   }

@@ -12,6 +12,73 @@ class ProxyHelper {
   static _agentCache = new Map()
 
   /**
+   * 解析代理 URL 字符串为代理配置对象
+   * 支持格式：protocol://[username:password@]host:port
+   * @param {string} url - 代理 URL
+   * @returns {object|null} 代理配置对象或 null
+   */
+  static parseProxyUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return null
+    }
+
+    const trimmed = url.split('#')[0].trim()
+    const pattern = /^(socks5|https?):\/\/(?:([^:@]+):([^@]+)@)?([^:]+):(\d+)$/i
+    const match = trimmed.match(pattern)
+
+    if (!match) {
+      logger.warn('⚠️ Invalid DEFAULT_PROXY_URL format, expected protocol://[user:pass@]host:port')
+      return null
+    }
+
+    const [, protocol, username, password, host, port] = match
+    return {
+      type: protocol.toLowerCase(),
+      host,
+      port: parseInt(port, 10),
+      username: username ? decodeURIComponent(username) : null,
+      password: password ? decodeURIComponent(password) : null
+    }
+  }
+
+  /**
+   * 获取默认代理配置（从环境变量 DEFAULT_PROXY_URL 读取）
+   * @returns {object|null} 默认代理配置对象或 null
+   */
+  static getDefaultProxyConfig() {
+    const url = config.proxy?.defaultProxyUrl || process.env.DEFAULT_PROXY_URL || ''
+    if (!url) {
+      return null
+    }
+    return ProxyHelper.parseProxyUrl(url)
+  }
+
+  /**
+   * 是否已配置默认代理
+   * @returns {boolean}
+   */
+  static isDefaultProxyConfigured() {
+    return ProxyHelper.getDefaultProxyConfig() !== null
+  }
+
+  /**
+   * 判断代理配置是否为「使用默认代理」标记
+   * @param {object|string|null} proxyConfig - 代理配置
+   * @returns {boolean}
+   */
+  static isUsingDefaultProxy(proxyConfig) {
+    if (!proxyConfig) {
+      return false
+    }
+    try {
+      const proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
+      return !!(proxy && proxy.useDefault)
+    } catch (error) {
+      return false
+    }
+  }
+
+  /**
    * 创建代理 Agent
    * @param {object|string|null} proxyConfig - 代理配置对象或 JSON 字符串
    * @param {object} options - 额外选项
@@ -25,7 +92,18 @@ class ProxyHelper {
 
     try {
       // 解析代理配置
-      const proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
+      let proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
+
+      // 「使用默认代理」标记：解析为环境变量配置的默认代理
+      if (proxy && proxy.useDefault) {
+        proxy = ProxyHelper.getDefaultProxyConfig()
+        if (!proxy) {
+          logger.warn(
+            '⚠️ Account is configured to use the default proxy, but DEFAULT_PROXY_URL is not set'
+          )
+          return null
+        }
+      }
 
       // 验证必要字段
       if (!proxy.type || !proxy.host || !proxy.port) {
@@ -182,6 +260,11 @@ class ProxyHelper {
     try {
       const proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
 
+      // 「使用默认代理」标记视为有效配置（实际地址在运行时解析）
+      if (proxy && proxy.useDefault) {
+        return true
+      }
+
       // 检查必要字段
       if (!proxy.type || !proxy.host || !proxy.port) {
         return false
@@ -216,6 +299,9 @@ class ProxyHelper {
 
     try {
       const proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
+      if (proxy && proxy.useDefault) {
+        return 'Default proxy'
+      }
       const hasAuth = proxy.username && proxy.password
       return `${proxy.type}://${proxy.host}:${proxy.port}${hasAuth ? ' (with auth)' : ''}`
     } catch (error) {
@@ -235,6 +321,10 @@ class ProxyHelper {
 
     try {
       const proxy = typeof proxyConfig === 'string' ? JSON.parse(proxyConfig) : proxyConfig
+
+      if (proxy && proxy.useDefault) {
+        return 'Default proxy'
+      }
 
       let proxyDesc = `${proxy.type}://${proxy.host}:${proxy.port}`
 

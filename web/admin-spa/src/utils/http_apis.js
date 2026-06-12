@@ -1,5 +1,9 @@
 import request from '@/utils/request'
 
+// 默认代理状态（是否已通过环境变量配置）
+export const getDefaultProxyStatusApi = () =>
+  request({ url: '/admin/proxy/default-status', method: 'GET' })
+
 // 模型
 export const getModelsApi = () => request({ url: '/apiStats/models', method: 'GET' })
 

@@ -30,134 +30,173 @@
         </div>
       </div>
 
-      <!-- 快速配置输入框 -->
-      <div>
-        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          快速配置
-          <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
-            (粘贴完整代理URL自动填充)
-          </span>
+      <!-- 代理模式选择（仅在已配置默认代理时显示）-->
+      <div v-if="defaultProxyConfigured" class="flex flex-wrap gap-4">
+        <label class="flex cursor-pointer items-center">
+          <input
+            :checked="!proxy.useDefault"
+            class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+            name="proxyMode"
+            type="radio"
+            @change="setProxyMode('manual')"
+          />
+          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">手动配置</span>
         </label>
-        <div class="relative">
+        <label class="flex cursor-pointer items-center">
           <input
-            v-model="proxyUrl"
-            class="form-input w-full border-gray-300 pr-10 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-            placeholder="例如: socks5://username:password@host:port 或 http://host:port"
-            type="text"
-            @input="handleInput"
-            @keyup.enter="parseProxyUrl"
-            @paste="handlePaste"
+            :checked="proxy.useDefault"
+            class="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
+            name="proxyMode"
+            type="radio"
+            @change="setProxyMode('default')"
           />
-          <button
-            v-if="proxyUrl"
-            class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400"
-            type="button"
-            @click="clearProxyUrl"
-          >
-            <i class="fas fa-times" />
-          </button>
-        </div>
-        <p v-if="parseError" class="mt-1 text-xs text-red-500">
-          <i class="fas fa-exclamation-circle mr-1" />
-          {{ parseError }}
-        </p>
-        <p v-else-if="parseSuccess" class="mt-1 text-xs text-green-500">
-          <i class="fas fa-check-circle mr-1" />
-          代理配置已自动填充
-        </p>
+          <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">使用默认代理</span>
+        </label>
       </div>
 
-      <div class="my-3 border-t border-gray-200 dark:border-gray-600"></div>
-
-      <div>
-        <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-          >代理类型</label
-        >
-        <select
-          v-model="proxy.type"
-          class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-        >
-          <option value="socks5">SOCKS5</option>
-          <option value="http">HTTP</option>
-          <option value="https">HTTPS</option>
-        </select>
+      <!-- 使用默认代理：仅展示占位，不显示实际地址 -->
+      <div
+        v-if="proxy.useDefault"
+        class="flex items-center gap-2 rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 dark:border-gray-600 dark:bg-gray-700"
+      >
+        <i class="fas fa-shield-halved text-sm text-gray-500 dark:text-gray-400" />
+        <span class="text-sm font-medium text-gray-700 dark:text-gray-200">[默认代理]</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400">
+          （由服务端环境变量配置，实际地址不在此显示）
+        </span>
       </div>
 
-      <div class="grid grid-cols-2 gap-4">
+      <!-- 手动配置 -->
+      <template v-if="!proxy.useDefault">
+        <!-- 快速配置输入框 -->
         <div>
-          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-            >主机地址</label
-          >
-          <input
-            v-model="proxy.host"
-            class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-            placeholder="例如: 192.168.1.100"
-            type="text"
-          />
-        </div>
-        <div>
-          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-            >端口</label
-          >
-          <input
-            v-model="proxy.port"
-            class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-            placeholder="例如: 1080"
-            type="number"
-          />
-        </div>
-      </div>
-
-      <div class="space-y-4">
-        <div class="flex items-center">
-          <input
-            id="proxyAuth"
-            v-model="showAuth"
-            class="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
-            type="checkbox"
-          />
-          <label
-            class="ml-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300"
-            for="proxyAuth"
-          >
-            需要身份验证
+          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
+            快速配置
+            <span class="ml-1 text-xs font-normal text-gray-500 dark:text-gray-400">
+              (粘贴完整代理URL自动填充)
+            </span>
           </label>
+          <div class="relative">
+            <input
+              v-model="proxyUrl"
+              class="form-input w-full border-gray-300 pr-10 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+              placeholder="例如: socks5://username:password@host:port 或 http://host:port"
+              type="text"
+              @input="handleInput"
+              @keyup.enter="parseProxyUrl"
+              @paste="handlePaste"
+            />
+            <button
+              v-if="proxyUrl"
+              class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400"
+              type="button"
+              @click="clearProxyUrl"
+            >
+              <i class="fas fa-times" />
+            </button>
+          </div>
+          <p v-if="parseError" class="mt-1 text-xs text-red-500">
+            <i class="fas fa-exclamation-circle mr-1" />
+            {{ parseError }}
+          </p>
+          <p v-else-if="parseSuccess" class="mt-1 text-xs text-green-500">
+            <i class="fas fa-check-circle mr-1" />
+            代理配置已自动填充
+          </p>
         </div>
 
-        <div v-if="showAuth" class="grid grid-cols-2 gap-4">
+        <div class="my-3 border-t border-gray-200 dark:border-gray-600"></div>
+
+        <div>
+          <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+            >代理类型</label
+          >
+          <select
+            v-model="proxy.type"
+            class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+          >
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >用户名</label
+              >主机地址</label
             >
             <input
-              v-model="proxy.username"
+              v-model="proxy.host"
               class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-              placeholder="代理用户名"
+              placeholder="例如: 192.168.1.100"
               type="text"
             />
           </div>
           <div>
             <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
-              >密码</label
+              >端口</label
             >
-            <div class="relative">
-              <input
-                v-model="proxy.password"
-                class="form-input w-full border-gray-300 pr-10 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                placeholder="代理密码"
-                :type="showPassword ? 'text' : 'password'"
-              />
-              <button
-                class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400"
-                type="button"
-                @click="showPassword = !showPassword"
+            <input
+              v-model="proxy.port"
+              class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+              placeholder="例如: 1080"
+              type="number"
+            />
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="flex items-center">
+            <input
+              id="proxyAuth"
+              v-model="showAuth"
+              class="h-4 w-4 rounded border-gray-300 bg-gray-100 text-blue-600 focus:ring-blue-500"
+              type="checkbox"
+            />
+            <label
+              class="ml-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300"
+              for="proxyAuth"
+            >
+              需要身份验证
+            </label>
+          </div>
+
+          <div v-if="showAuth" class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >用户名</label
               >
-                <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'" />
-              </button>
+              <input
+                v-model="proxy.username"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                placeholder="代理用户名"
+                type="text"
+              />
+            </div>
+            <div>
+              <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300"
+                >密码</label
+              >
+              <div class="relative">
+                <input
+                  v-model="proxy.password"
+                  class="form-input w-full border-gray-300 pr-10 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  placeholder="代理密码"
+                  :type="showPassword ? 'text' : 'password'"
+                />
+                <button
+                  class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-400"
+                  type="button"
+                  @click="showPassword = !showPassword"
+                >
+                  <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <div
         class="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/30"
@@ -173,13 +212,15 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted, onMounted } from 'vue'
+import { getDefaultProxyStatusApi } from '@/utils/http_apis'
 
 const props = defineProps({
   modelValue: {
     type: Object,
     default: () => ({
       enabled: false,
+      useDefault: false,
       type: 'socks5',
       host: '',
       port: '',
@@ -192,11 +233,29 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 // 内部代理数据
-const proxy = ref({ ...props.modelValue })
+const proxy = ref({ useDefault: false, ...props.modelValue })
 
 // UI状态
 const showAuth = ref(!!(proxy.value.username || proxy.value.password))
 const showPassword = ref(false)
+
+// 默认代理是否已在后端通过环境变量配置
+const defaultProxyConfigured = ref(false)
+
+onMounted(async () => {
+  try {
+    const res = await getDefaultProxyStatusApi()
+    defaultProxyConfigured.value = !!(res && res.configured)
+  } catch (error) {
+    defaultProxyConfigured.value = false
+  }
+})
+
+// 切换代理模式：manual=手动配置, default=使用默认代理
+function setProxyMode(mode) {
+  proxy.value.useDefault = mode === 'default'
+  emitUpdate()
+}
 
 // 快速配置相关
 const proxyUrl = ref('')
@@ -209,7 +268,7 @@ watch(
   (newVal) => {
     // 只有当值真正不同时才更新，避免循环
     if (JSON.stringify(newVal) !== JSON.stringify(proxy.value)) {
-      proxy.value = { ...newVal }
+      proxy.value = { useDefault: false, ...newVal }
       showAuth.value = !!(newVal.username || newVal.password)
     }
   },
@@ -280,8 +339,12 @@ function emitUpdate() {
   updateTimer = setTimeout(() => {
     const data = { ...proxy.value }
 
-    // 如果不需要认证，清空用户名密码
-    if (!showAuth.value) {
+    // 使用默认代理时，不携带手动配置字段
+    if (data.useDefault) {
+      data.username = ''
+      data.password = ''
+    } else if (!showAuth.value) {
+      // 如果不需要认证，清空用户名密码
       data.username = ''
       data.password = ''
     }
