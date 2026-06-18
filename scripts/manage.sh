@@ -54,13 +54,28 @@ print_warning() {
 # 检测操作系统
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        if [ -f /etc/debian_version ]; then
+        # 优先解析 /etc/os-release（兼容 OpenCloudOS、Rocky、AlmaLinux 等 RHEL 衍生发行版）
+        local os_id=""
+        local os_id_like=""
+        if [ -f /etc/os-release ]; then
+            os_id=$(. /etc/os-release 2>/dev/null && echo "$ID")
+            os_id_like=$(. /etc/os-release 2>/dev/null && echo "$ID_LIKE")
+        fi
+
+        local os_id_all="$os_id $os_id_like"
+
+        if [ -f /etc/debian_version ] || [[ "$os_id_all" == *debian* ]] || [[ "$os_id_all" == *ubuntu* ]]; then
             OS="debian"
             PACKAGE_MANAGER="apt-get"
-        elif [ -f /etc/redhat-release ]; then
+        elif [ -f /etc/redhat-release ] || [[ "$os_id_all" == *rhel* ]] || [[ "$os_id_all" == *fedora* ]] || [[ "$os_id_all" == *centos* ]] || [[ "$os_id_all" == *opencloudos* ]]; then
             OS="redhat"
-            PACKAGE_MANAGER="yum"
-        elif [ -f /etc/arch-release ]; then
+            # OpenCloudOS 9 等新发行版使用 dnf
+            if command_exists dnf; then
+                PACKAGE_MANAGER="dnf"
+            else
+                PACKAGE_MANAGER="yum"
+            fi
+        elif [ -f /etc/arch-release ] || [[ "$os_id_all" == *arch* ]]; then
             OS="arch"
             PACKAGE_MANAGER="pacman"
         else
@@ -426,7 +441,7 @@ install_service() {
         rm -rf "$APP_DIR"
     fi
     
-    if ! git clone https://github.com/Wei-Shaw/claude-relay-service.git "$APP_DIR"; then
+    if ! git clone "$REPO_URL" "$APP_DIR"; then
         print_error "克隆项目失败"
         return 1
     fi
@@ -492,11 +507,12 @@ EOF
         
         # 使用 sparse-checkout 来只获取需要的文件
         git clone --depth 1 --branch web-dist --single-branch \
-            https://github.com/Wei-Shaw/claude-relay-service.git \
+            "$REPO_URL" \
             "$TEMP_CLONE_DIR" 2>/dev/null || {
-            # 如果 HTTPS 失败，尝试使用当前仓库的 remote URL
-            REPO_URL=$(git config --get remote.origin.url)
-            git clone --depth 1 --branch web-dist --single-branch "$REPO_URL" "$TEMP_CLONE_DIR"
+            # 如果指定地址失败，尝试使用当前仓库的 remote URL
+            local fallback_repo_url
+            fallback_repo_url=$(git config --get remote.origin.url)
+            git clone --depth 1 --branch web-dist --single-branch "$fallback_repo_url" "$TEMP_CLONE_DIR"
         }
         
         # 复制文件到目标目录（排除 .git 和 README.md）
@@ -695,15 +711,16 @@ update_service() {
             print_info "尝试下载前端文件 (第 $attempt 次)..."
             
             if git clone --depth 1 --branch web-dist --single-branch \
-                https://github.com/Wei-Shaw/claude-relay-service.git \
+                "$REPO_URL" \
                 "$TEMP_CLONE_DIR" 2>/dev/null; then
                 clone_success=true
                 break
             fi
-            
-            # 如果 HTTPS 失败，尝试使用当前仓库的 remote URL
-            REPO_URL=$(git config --get remote.origin.url)
-            if git clone --depth 1 --branch web-dist --single-branch "$REPO_URL" "$TEMP_CLONE_DIR" 2>/dev/null; then
+
+            # 如果指定地址失败，尝试使用当前仓库的 remote URL
+            local fallback_repo_url
+            fallback_repo_url=$(git config --get remote.origin.url)
+            if git clone --depth 1 --branch web-dist --single-branch "$fallback_repo_url" "$TEMP_CLONE_DIR" 2>/dev/null; then
                 clone_success=true
                 break
             fi
@@ -1232,7 +1249,7 @@ switch_branch() {
             
             # 下载前端文件
             if git clone --depth 1 --branch "$web_branch" --single-branch \
-                https://github.com/Wei-Shaw/claude-relay-service.git \
+                "$REPO_URL" \
                 "$TEMP_CLONE_DIR" 2>/dev/null; then
                 
                 # 复制文件到目标目录
