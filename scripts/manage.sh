@@ -20,6 +20,10 @@ DEFAULT_REDIS_PORT="6379"
 DEFAULT_REDIS_PASSWORD=""
 DEFAULT_APP_PORT="3000"
 
+# 项目更新地址（可通过环境变量 CRS_REPO_URL 覆盖）
+DEFAULT_REPO_URL="https://github.com/Wei-Shaw/claude-relay-service.git"
+REPO_URL="${CRS_REPO_URL:-$DEFAULT_REPO_URL}"
+
 # 全局变量
 INSTALL_DIR=""
 APP_DIR=""
