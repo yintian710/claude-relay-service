@@ -75,7 +75,14 @@ class AccountGroupService {
    */
   async createGroup(groupData) {
     try {
-      const { name, platform, description = '' } = groupData
+      const {
+        name,
+        platform,
+        description = '',
+        ownerUserId = '',
+        ownerUsername = '',
+        createdByType = ownerUserId ? 'user' : 'admin'
+      } = groupData
 
       // 验证必填字段
       if (!name || !platform) {
@@ -96,6 +103,9 @@ class AccountGroupService {
         name,
         platform,
         description,
+        ownerUserId,
+        ownerUsername,
+        createdByType,
         createdAt: now,
         updatedAt: now
       }
@@ -238,8 +248,9 @@ class AccountGroupService {
    * @param {string} platform - 平台筛选 (可选)
    * @returns {Array} 分组列表
    */
-  async getAllGroups(platform = null) {
+  async getAllGroups(platform = null, options = {}) {
     try {
+      const { ownerUserId = null, includeGlobal = false } = options
       const client = redis.getClientSafe()
       const groupIds = await client.smembers(this.GROUPS_KEY)
 
@@ -247,6 +258,13 @@ class AccountGroupService {
       for (const groupId of groupIds) {
         const group = await this.getGroup(groupId)
         if (group) {
+          if (ownerUserId !== null) {
+            const ownedByUser = group.ownerUserId === ownerUserId
+            const globalGroup = includeGlobal && !group.ownerUserId
+            if (!ownedByUser && !globalGroup) {
+              continue
+            }
+          }
           // 如果指定了平台，进行筛选
           if (!platform || group.platform === platform) {
             groups.push(group)

@@ -49,6 +49,107 @@
             ></textarea>
           </div>
 
+          <div class="rounded-md border border-gray-200 bg-gray-50 p-4">
+            <div class="mb-3">
+              <h4 class="text-sm font-medium text-gray-900">Account bindings</h4>
+              <p class="mt-1 text-xs text-gray-500">
+                Optional. Leave blank to auto-schedule across accounts visible to you.
+              </p>
+            </div>
+            <div v-if="bindingLoading" class="text-sm text-gray-500">Loading accounts...</div>
+            <div v-else class="grid gap-3 md:grid-cols-2">
+              <label class="block">
+                <span class="text-xs font-medium text-gray-600">Claude / Bedrock</span>
+                <select
+                  v-model="bindingForm.claude"
+                  class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                  :disabled="loading"
+                >
+                  <option value="">Auto from visible Claude accounts</option>
+                  <option
+                    v-for="option in claudeBindingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="block">
+                <span class="text-xs font-medium text-gray-600">Gemini</span>
+                <select
+                  v-model="bindingForm.gemini"
+                  class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                  :disabled="loading"
+                >
+                  <option value="">Auto from visible Gemini accounts</option>
+                  <option
+                    v-for="option in geminiBindingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="block">
+                <span class="text-xs font-medium text-gray-600">OpenAI</span>
+                <select
+                  v-model="bindingForm.openai"
+                  class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                  :disabled="loading"
+                >
+                  <option value="">Auto from visible OpenAI accounts</option>
+                  <option
+                    v-for="option in openaiBindingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="block">
+                <span class="text-xs font-medium text-gray-600">Azure OpenAI</span>
+                <select
+                  v-model="bindingForm.azureOpenai"
+                  class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                  :disabled="loading"
+                >
+                  <option value="">Auto from visible Azure accounts</option>
+                  <option
+                    v-for="option in azureOpenaiBindingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+
+              <label class="block md:col-span-2">
+                <span class="text-xs font-medium text-gray-600">Droid</span>
+                <select
+                  v-model="bindingForm.droid"
+                  class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                  :disabled="loading"
+                >
+                  <option value="">Auto from visible Droid accounts</option>
+                  <option
+                    v-for="option in droidBindingOptions"
+                    :key="option.value"
+                    :value="option.value"
+                  >
+                    {{ option.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+          </div>
+
           <div v-if="error" class="rounded-md border border-red-200 bg-red-50 p-3">
             <div class="flex">
               <div class="flex-shrink-0">
@@ -171,7 +272,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { computed, ref, reactive, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { showToast } from '@/utils/tools'
 
@@ -187,19 +288,122 @@ const emit = defineEmits(['close', 'created'])
 const userStore = useUserStore()
 
 const loading = ref(false)
+const bindingLoading = ref(false)
 const error = ref('')
 const newApiKey = ref(null)
+const accountsByType = ref({})
+const accountGroups = ref([])
 
 const form = reactive({
   name: '',
   description: ''
 })
 
+const bindingForm = reactive({
+  claude: '',
+  gemini: '',
+  openai: '',
+  azureOpenai: '',
+  droid: ''
+})
+
+const typeLabels = {
+  claude: 'Claude',
+  'claude-console': 'Claude Console',
+  bedrock: 'Bedrock',
+  gemini: 'Gemini',
+  'gemini-api': 'Gemini API',
+  openai: 'OpenAI',
+  'openai-responses': 'OpenAI Responses',
+  'azure-openai': 'Azure OpenAI',
+  droid: 'Droid'
+}
+
+const accountOptions = (accountType, field, valuePrefix = '') =>
+  (accountsByType.value[accountType] || []).map((account) => ({
+    label: `${typeLabels[accountType] || accountType}: ${account.name || account.id}`,
+    value: `${field}|${valuePrefix}${account.id}`
+  }))
+
+const groupOptions = (platform, field) =>
+  accountGroups.value
+    .filter((group) => group.platform === platform)
+    .map((group) => ({
+      label: `Use group: ${group.name}`,
+      value: `${field}|group:${group.id}`
+    }))
+
+const claudeBindingOptions = computed(() => [
+  ...groupOptions('claude', 'claudeAccountId'),
+  ...accountOptions('claude', 'claudeAccountId'),
+  ...accountOptions('claude-console', 'claudeConsoleAccountId'),
+  ...accountOptions('bedrock', 'bedrockAccountId')
+])
+
+const geminiBindingOptions = computed(() => [
+  ...groupOptions('gemini', 'geminiAccountId'),
+  ...accountOptions('gemini', 'geminiAccountId'),
+  ...accountOptions('gemini-api', 'geminiAccountId', 'api:')
+])
+
+const openaiBindingOptions = computed(() => [
+  ...groupOptions('openai', 'openaiAccountId'),
+  ...accountOptions('openai', 'openaiAccountId'),
+  ...accountOptions('openai-responses', 'openaiAccountId', 'responses:')
+])
+
+const azureOpenaiBindingOptions = computed(() => [
+  ...groupOptions('openai', 'azureOpenaiAccountId'),
+  ...accountOptions('azure-openai', 'azureOpenaiAccountId')
+])
+
+const droidBindingOptions = computed(() => [
+  ...groupOptions('droid', 'droidAccountId'),
+  ...accountOptions('droid', 'droidAccountId')
+])
+
 const resetForm = () => {
   form.name = ''
   form.description = ''
+  bindingForm.claude = ''
+  bindingForm.gemini = ''
+  bindingForm.openai = ''
+  bindingForm.azureOpenai = ''
+  bindingForm.droid = ''
   error.value = ''
   newApiKey.value = null
+}
+
+const loadBindingOptions = async () => {
+  bindingLoading.value = true
+  try {
+    const [accounts, groups] = await Promise.all([
+      userStore.getVisibleAccounts(),
+      userStore.getAccountGroups()
+    ])
+    accountsByType.value = accounts
+    accountGroups.value = groups
+  } catch (err) {
+    console.error('Load binding options error:', err)
+    showToast('Failed to load visible accounts and groups', 'error')
+  } finally {
+    bindingLoading.value = false
+  }
+}
+
+const applyBinding = (apiKeyData, encodedBinding) => {
+  if (!encodedBinding) {
+    return
+  }
+  const separatorIndex = encodedBinding.indexOf('|')
+  if (separatorIndex <= 0) {
+    return
+  }
+  const field = encodedBinding.slice(0, separatorIndex)
+  const value = encodedBinding.slice(separatorIndex + 1)
+  if (field && value) {
+    apiKeyData[field] = value
+  }
 }
 
 const handleSubmit = async () => {
@@ -216,6 +420,11 @@ const handleSubmit = async () => {
       name: form.name.trim(),
       description: form.description.trim() || undefined
     }
+    applyBinding(apiKeyData, bindingForm.claude)
+    applyBinding(apiKeyData, bindingForm.gemini)
+    applyBinding(apiKeyData, bindingForm.openai)
+    applyBinding(apiKeyData, bindingForm.azureOpenai)
+    applyBinding(apiKeyData, bindingForm.droid)
 
     const result = await userStore.createApiKey(apiKeyData)
 
@@ -255,6 +464,7 @@ watch(
   (newValue) => {
     if (newValue) {
       resetForm()
+      loadBindingOptions()
     }
   }
 )

@@ -309,6 +309,7 @@ export const testDefaultBalanceScriptApi = (data) =>
 
 // 前台用户管理
 export const getFrontUsersApi = (params) => request({ url: '/users', method: 'GET', params })
+export const createFrontUserApi = (data) => request({ url: '/users', method: 'POST', data })
 export const getFrontUsersStatsOverviewApi = () =>
   request({ url: '/users/stats/overview', method: 'GET' })
 export const getFrontUserByIdApi = (id) => request({ url: `/users/${id}`, method: 'GET' })
@@ -320,6 +321,8 @@ export const getFrontUserUsageStatsApi = (id, params) =>
   request({ url: `/users/${id}/usage-stats`, method: 'GET', params })
 export const updateFrontUserRoleApi = (id, data) =>
   request({ url: `/users/${id}/role`, method: 'PATCH', data })
+export const updateFrontUserPasswordApi = (id, data) =>
+  request({ url: `/users/${id}/password`, method: 'PATCH', data })
 
 // Webhook 配置
 export const getWebhookConfigApi = (config) =>

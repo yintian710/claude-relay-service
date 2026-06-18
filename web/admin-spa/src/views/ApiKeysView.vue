@@ -1,6 +1,7 @@
 <template>
   <div class="tab-content">
-    <div class="card p-4 sm:p-6">
+    <UserApiKeysManager v-if="isUserMode" />
+    <div v-else class="card p-4 sm:p-6">
       <div class="mb-4 flex flex-col gap-4 sm:mb-6">
         <div>
           <h3 class="mb-1 text-lg font-bold text-gray-900 dark:text-gray-100 sm:mb-2 sm:text-xl">
@@ -2172,6 +2173,7 @@ import { showToast, copyText, formatNumber, formatDate } from '@/utils/tools'
 
 import * as httpApis from '@/utils/http_apis'
 import { useAuthStore } from '@/stores/auth'
+import { useUserStore } from '@/stores/user'
 import * as XLSX from 'xlsx-js-style'
 import CreateApiKeyModal from '@/components/apikeys/CreateApiKeyModal.vue'
 import EditApiKeyModal from '@/components/apikeys/EditApiKeyModal.vue'
@@ -2186,10 +2188,13 @@ import LimitProgressBar from '@/components/apikeys/LimitProgressBar.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
 import ActionDropdown from '@/components/common/ActionDropdown.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
+import UserApiKeysManager from '@/components/user/UserApiKeysManager.vue'
 
 // 响应式数据
 const router = useRouter()
 const authStore = useAuthStore()
+const userStore = useUserStore()
+const isUserMode = computed(() => userStore.isAuthenticated && !authStore.isAuthenticated)
 const apiKeys = ref([])
 
 // 获取 LDAP 启用状态
@@ -4821,6 +4826,10 @@ watch(apiKeys, () => {
 })
 
 onMounted(async () => {
+  if (isUserMode.value) {
+    return
+  }
+
   // 获取费用排序索引状态（不阻塞，会自动调度后续刷新）
   fetchCostSortStatus()
 

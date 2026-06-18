@@ -11,7 +11,7 @@
         <LogoTitle
           :loading="oemLoading"
           :logo-src="oemSettings.siteIconData || oemSettings.siteIcon"
-          subtitle="管理后台"
+          :subtitle="isUserMode ? '用户控制台' : '管理后台'"
           :title="oemSettings.siteName"
           title-class="text-white dark:text-gray-100"
         >
@@ -125,6 +125,7 @@
             </div>
 
             <button
+              v-if="!isUserMode"
               class="flex w-full items-center gap-3 px-4 py-3 text-left text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700"
               @click="openChangePasswordModal"
             >
@@ -290,6 +291,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useUserStore } from '@/stores/user'
 import { showToast } from '@/utils/tools'
 
 import { checkUpdatesApi, changePasswordApi } from '@/utils/http_apis'
@@ -299,9 +301,15 @@ import ConfirmModal from '@/components/common/ConfirmModal.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const userStore = useUserStore()
 
 // 当前用户信息
-const currentUser = computed(() => authStore.user || { username: 'Admin' })
+const isUserMode = computed(() => userStore.isAuthenticated && !authStore.isAuthenticated)
+const currentUser = computed(() =>
+  isUserMode.value
+    ? userStore.user || { username: 'User' }
+    : authStore.user || { username: 'Admin' }
+)
 
 // OEM设置
 const oemSettings = computed(() => authStore.oemSettings || {})
@@ -492,7 +500,11 @@ const logout = async () => {
     'warning'
   )
   if (confirmed) {
-    authStore.logout()
+    if (isUserMode.value) {
+      await userStore.logout()
+    } else {
+      authStore.logout()
+    }
     router.push('/login')
     showToast('已安全退出', 'success')
   }

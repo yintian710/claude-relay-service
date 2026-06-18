@@ -1319,7 +1319,10 @@ const authenticateApiKey = async (req, res, next) => {
       totalCost: validation.keyData.totalCost,
       enableOpenAIResponsesCodexAdaptation: validation.keyData.enableOpenAIResponsesCodexAdaptation,
       enableOpenAIResponsesPayloadRules: validation.keyData.enableOpenAIResponsesPayloadRules,
-      openaiResponsesPayloadRules: validation.keyData.openaiResponsesPayloadRules
+      openaiResponsesPayloadRules: validation.keyData.openaiResponsesPayloadRules,
+      userId: validation.keyData.userId || '',
+      userUsername: validation.keyData.userUsername || '',
+      createdBy: validation.keyData.createdBy || ''
     }
 
     const authDuration = Date.now() - startTime

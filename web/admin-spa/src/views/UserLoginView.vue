@@ -181,7 +181,7 @@ const handleLogin = async () => {
     })
 
     showToast('Login successful!', 'success')
-    router.push('/user-dashboard')
+    router.push('/dashboard')
   } catch (err) {
     console.error('Login error:', err)
     error.value = err.response?.data?.message || err.message || 'Login failed'

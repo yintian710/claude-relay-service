@@ -9,6 +9,169 @@ const inputValidator = require('../utils/inputValidator')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const redis = require('../models/redis')
 const { authenticateUser, authenticateUserOrAdmin, requireAdmin } = require('../middleware/auth')
+const accountGroupService = require('../services/accountGroupService')
+const permissionGroupService = require('../services/permissionGroupService')
+const resourceVisibilityService = require('../services/resourceVisibilityService')
+const claudeAccountService = require('../services/account/claudeAccountService')
+const claudeConsoleAccountService = require('../services/account/claudeConsoleAccountService')
+const geminiAccountService = require('../services/account/geminiAccountService')
+const geminiApiAccountService = require('../services/account/geminiApiAccountService')
+const openaiAccountService = require('../services/account/openaiAccountService')
+const openaiResponsesAccountService = require('../services/account/openaiResponsesAccountService')
+const azureOpenaiAccountService = require('../services/account/azureOpenaiAccountService')
+const droidAccountService = require('../services/account/droidAccountService')
+const bedrockAccountService = require('../services/account/bedrockAccountService')
+
+const USER_ACCOUNT_SERVICES = {
+  claude: {
+    list: () => claudeAccountService.getAllAccounts(),
+    create: (data) => claudeAccountService.createAccount(data),
+    get: (id) => claudeAccountService.getAccount(id),
+    update: (id, data) => claudeAccountService.updateAccount(id, data),
+    delete: (id) => claudeAccountService.deleteAccount(id)
+  },
+  'claude-console': {
+    list: () => claudeConsoleAccountService.getAllAccounts(),
+    create: (data) => claudeConsoleAccountService.createAccount(data),
+    get: (id) => claudeConsoleAccountService.getAccount(id),
+    update: (id, data) => claudeConsoleAccountService.updateAccount(id, data),
+    delete: (id) => claudeConsoleAccountService.deleteAccount(id)
+  },
+  gemini: {
+    list: () => geminiAccountService.getAllAccounts(),
+    create: (data) => geminiAccountService.createAccount(data),
+    get: (id) => geminiAccountService.getAccount(id),
+    update: (id, data) => geminiAccountService.updateAccount(id, data),
+    delete: (id) => geminiAccountService.deleteAccount(id)
+  },
+  'gemini-api': {
+    list: () => geminiApiAccountService.getAllAccounts(true),
+    create: (data) => geminiApiAccountService.createAccount(data),
+    get: (id) => geminiApiAccountService.getAccount(id),
+    update: (id, data) => geminiApiAccountService.updateAccount(id, data),
+    delete: (id) => geminiApiAccountService.deleteAccount(id)
+  },
+  openai: {
+    list: () => openaiAccountService.getAllAccounts(),
+    create: (data) => openaiAccountService.createAccount(data),
+    get: (id) => openaiAccountService.getAccount(id),
+    update: (id, data) => openaiAccountService.updateAccount(id, data),
+    delete: (id) => openaiAccountService.deleteAccount(id)
+  },
+  'openai-responses': {
+    list: () => openaiResponsesAccountService.getAllAccounts(true),
+    create: (data) => openaiResponsesAccountService.createAccount(data),
+    get: (id) => openaiResponsesAccountService.getAccount(id),
+    update: (id, data) => openaiResponsesAccountService.updateAccount(id, data),
+    delete: (id) => openaiResponsesAccountService.deleteAccount(id)
+  },
+  'azure-openai': {
+    list: () => azureOpenaiAccountService.getAllAccounts(),
+    create: (data) => azureOpenaiAccountService.createAccount(data),
+    get: (id) => azureOpenaiAccountService.getAccount(id),
+    update: (id, data) => azureOpenaiAccountService.updateAccount(id, data),
+    delete: (id) => azureOpenaiAccountService.deleteAccount(id)
+  },
+  droid: {
+    list: () => droidAccountService.getAllAccounts(),
+    create: (data) => droidAccountService.createAccount(data),
+    get: (id) => droidAccountService.getAccount(id),
+    update: (id, data) => droidAccountService.updateAccount(id, data),
+    delete: (id) => droidAccountService.deleteAccount(id)
+  },
+  bedrock: {
+    list: async () => {
+      const result = await bedrockAccountService.getAllAccounts()
+      return result.success ? result.data : []
+    },
+    create: async (data) => {
+      const result = await bedrockAccountService.createAccount(data)
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create Bedrock account')
+      }
+      return result.data
+    },
+    get: async (id) => {
+      const result = await bedrockAccountService.getAccount(id)
+      return result.success ? result.data : null
+    },
+    update: async (id, data) => {
+      const result = await bedrockAccountService.updateAccount(id, data)
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to update Bedrock account')
+      }
+      return result.data
+    },
+    delete: async (id) => {
+      const result = await bedrockAccountService.deleteAccount(id)
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete Bedrock account')
+      }
+      return result
+    }
+  }
+}
+
+function getUserActor(req) {
+  return {
+    id: req.user.id,
+    username: req.user.username,
+    type: 'user'
+  }
+}
+
+function normalizeAccountListResult(result) {
+  if (Array.isArray(result)) {
+    return result
+  }
+  if (result?.success && Array.isArray(result.data)) {
+    return result.data
+  }
+  return []
+}
+
+function getUserAuthMode() {
+  const configuredMode = config.userManagement.authMode
+  return String(configuredMode || (config.ldap?.enabled ? 'ldap' : 'local')).toLowerCase()
+}
+
+async function validateUserAccountBindings(userId, payload) {
+  const bindings = [
+    ['claude', payload.claudeAccountId],
+    ['claude-console', payload.claudeConsoleAccountId],
+    ['gemini', payload.geminiAccountId],
+    ['openai', payload.openaiAccountId],
+    ['azure-openai', payload.azureOpenaiAccountId],
+    ['bedrock', payload.bedrockAccountId],
+    ['droid', payload.droidAccountId]
+  ]
+
+  for (const [accountType, rawValue] of bindings) {
+    if (!rawValue || typeof rawValue !== 'string') {
+      continue
+    }
+    if (rawValue.startsWith('group:')) {
+      const group = await accountGroupService.getGroup(rawValue.slice('group:'.length))
+      await resourceVisibilityService.assertCanUseAccountGroup(userId, group)
+      continue
+    }
+
+    let effectiveType = accountType
+    let accountId = rawValue
+    if (rawValue.startsWith('console:')) {
+      effectiveType = 'claude-console'
+      accountId = rawValue.slice('console:'.length)
+    } else if (rawValue.startsWith('responses:')) {
+      effectiveType = 'openai-responses'
+      accountId = rawValue.slice('responses:'.length)
+    } else if (rawValue.startsWith('api:')) {
+      effectiveType = 'gemini-api'
+      accountId = rawValue.slice('api:'.length)
+    }
+
+    await resourceVisibilityService.assertCanUseAccount(userId, effectiveType, accountId)
+  }
+}
 
 // 🚦 配置登录速率限制
 // 只基于IP地址限制，避免攻击者恶意锁定特定账户
@@ -114,16 +277,25 @@ router.post('/login', async (req, res) => {
       })
     }
 
-    // 检查LDAP是否启用
-    if (!config.ldap || !config.ldap.enabled) {
+    const authMode = getUserAuthMode()
+    if (!['local', 'ldap'].includes(authMode)) {
+      return res.status(503).json({
+        error: 'Service unavailable',
+        message: `Unsupported user authentication mode: ${authMode}`
+      })
+    }
+
+    if (authMode === 'ldap' && (!config.ldap || !config.ldap.enabled)) {
       return res.status(503).json({
         error: 'Service unavailable',
         message: 'LDAP authentication is not enabled'
       })
     }
 
-    // 尝试LDAP认证
-    const authResult = await ldapService.authenticateUserCredentials(validatedUsername, password)
+    const authResult =
+      authMode === 'ldap'
+        ? await ldapService.authenticateUserCredentials(validatedUsername, password)
+        : await userService.authenticateLocalUserCredentials(validatedUsername, password)
 
     if (!authResult.success) {
       // 登录失败
@@ -149,7 +321,8 @@ router.post('/login', async (req, res) => {
         lastName: authResult.user.lastName,
         role: authResult.user.role
       },
-      sessionToken: authResult.sessionToken
+      sessionToken: authResult.sessionToken,
+      authMode
     })
   } catch (error) {
     logger.error('❌ User login error:', error)
@@ -208,6 +381,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
         totalUsage: user.totalUsage
       },
       config: {
+        authMode: getUserAuthMode(),
         maxApiKeysPerUser: config.userManagement.maxApiKeysPerUser,
         allowUserDeleteApiKeys: config.userManagement.allowUserDeleteApiKeys
       }
@@ -217,6 +391,42 @@ router.get('/profile', authenticateUser, async (req, res) => {
     res.status(500).json({
       error: 'Profile error',
       message: 'Failed to retrieve user profile'
+    })
+  }
+})
+
+// 🔐 当前用户修改本地密码
+router.patch('/profile/password', authenticateUser, async (req, res) => {
+  try {
+    if (getUserAuthMode() !== 'local') {
+      return res.status(400).json({
+        error: 'Unsupported operation',
+        message: 'Password changes are only available in local auth mode'
+      })
+    }
+
+    const { currentPassword, newPassword } = req.body
+    inputValidator.validatePassword(currentPassword)
+    inputValidator.validatePassword(newPassword)
+
+    const authResult = await userService.authenticateLocalUserCredentials(
+      req.user.username,
+      currentPassword
+    )
+    if (!authResult.success) {
+      return res.status(401).json({
+        error: 'Authentication failed',
+        message: 'Current password is incorrect'
+      })
+    }
+
+    await userService.updateLocalUserPassword(req.user.id, newPassword)
+    res.json({ success: true, message: 'Password updated successfully' })
+  } catch (error) {
+    logger.error('❌ Change user password error:', error)
+    res.status(error.statusCode || 400).json({
+      error: 'Password update error',
+      message: error.message || 'Failed to update password'
     })
   }
 })
@@ -268,7 +478,14 @@ router.get('/api-keys', authenticateUser, async (req, res) => {
         isDeleted: key.isDeleted,
         deletedAt: key.deletedAt,
         deletedBy: key.deletedBy,
-        deletedByType: key.deletedByType
+        deletedByType: key.deletedByType,
+        claudeAccountId: key.claudeAccountId || '',
+        claudeConsoleAccountId: key.claudeConsoleAccountId || '',
+        geminiAccountId: key.geminiAccountId || '',
+        openaiAccountId: key.openaiAccountId || '',
+        azureOpenaiAccountId: key.azureOpenaiAccountId || '',
+        bedrockAccountId: key.bedrockAccountId || '',
+        droidAccountId: key.droidAccountId || ''
       }
     })
 
@@ -289,7 +506,22 @@ router.get('/api-keys', authenticateUser, async (req, res) => {
 // 🔑 创建新的API Key
 router.post('/api-keys', authenticateUser, async (req, res) => {
   try {
-    const { name, description, tokenLimit, expiresAt, dailyCostLimit, totalCostLimit } = req.body
+    const {
+      name,
+      description,
+      tokenLimit,
+      expiresAt,
+      dailyCostLimit,
+      totalCostLimit,
+      claudeAccountId,
+      claudeConsoleAccountId,
+      geminiAccountId,
+      openaiAccountId,
+      azureOpenaiAccountId,
+      bedrockAccountId,
+      droidAccountId,
+      permissions
+    } = req.body
 
     if (!name || !name.trim()) {
       return res.status(400).json({
@@ -319,6 +551,16 @@ router.post('/api-keys', authenticateUser, async (req, res) => {
       })
     }
 
+    await validateUserAccountBindings(req.user.id, {
+      claudeAccountId,
+      claudeConsoleAccountId,
+      geminiAccountId,
+      openaiAccountId,
+      azureOpenaiAccountId,
+      bedrockAccountId,
+      droidAccountId
+    })
+
     // 创建API Key数据
     const apiKeyData = {
       name: name.trim(),
@@ -330,8 +572,14 @@ router.post('/api-keys', authenticateUser, async (req, res) => {
       dailyCostLimit: dailyCostLimit || null,
       totalCostLimit: totalCostLimit || null,
       createdBy: 'user',
-      // 设置服务权限为全部服务，确保前端显示“服务权限”为“全部服务”且具备完整访问权限
-      permissions: 'all'
+      permissions: permissions || 'all',
+      claudeAccountId: claudeAccountId || null,
+      claudeConsoleAccountId: claudeConsoleAccountId || null,
+      geminiAccountId: geminiAccountId || null,
+      openaiAccountId: openaiAccountId || null,
+      azureOpenaiAccountId: azureOpenaiAccountId || null,
+      bedrockAccountId: bedrockAccountId || null,
+      droidAccountId: droidAccountId || null
     }
 
     const newApiKey = await apiKeyService.createApiKey(apiKeyData)
@@ -358,9 +606,9 @@ router.post('/api-keys', authenticateUser, async (req, res) => {
     })
   } catch (error) {
     logger.error('❌ Create user API key error:', error)
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       error: 'API Key creation error',
-      message: 'Failed to create API key'
+      message: error.message || 'Failed to create API key'
     })
   }
 })
@@ -448,6 +696,382 @@ router.get('/usage-stats', authenticateUser, async (req, res) => {
   }
 })
 
+// 👁️ 获取当前用户可见账号
+router.get('/accounts', authenticateUser, async (req, res) => {
+  try {
+    const { accountType, platform } = req.query
+    const requestedType = accountType
+      ? resourceVisibilityService.normalizeAccountType(accountType)
+      : null
+    const platformFilter = platform || null
+
+    const accountTypes = requestedType
+      ? [requestedType]
+      : resourceVisibilityService.getAccountTypes()
+
+    const result = {}
+    for (const type of accountTypes) {
+      const service = USER_ACCOUNT_SERVICES[type]
+      if (!service) {
+        continue
+      }
+      const category = resourceVisibilityService.getAccountCategory(type)
+      if (platformFilter && platformFilter !== category && platformFilter !== type) {
+        continue
+      }
+
+      const allAccounts = normalizeAccountListResult(await service.list())
+      const visibleAccounts = await resourceVisibilityService.filterVisibleAccounts(
+        req.user.id,
+        allAccounts,
+        type
+      )
+      result[type] = await resourceVisibilityService.annotateVisibility(
+        req.user.id,
+        visibleAccounts,
+        type
+      )
+    }
+
+    res.json({ success: true, data: result })
+  } catch (error) {
+    logger.error('❌ Get user visible accounts error:', error)
+    res.status(500).json({
+      error: 'Accounts error',
+      message: 'Failed to retrieve visible accounts'
+    })
+  }
+})
+
+// 🏢 创建当前用户自己的账号
+router.post('/accounts/:accountType', authenticateUser, async (req, res) => {
+  try {
+    const accountType = resourceVisibilityService.normalizeAccountType(req.params.accountType)
+    const service = USER_ACCOUNT_SERVICES[accountType]
+    if (!service) {
+      return res.status(400).json({ error: 'Unsupported account type' })
+    }
+
+    const account = await service.create({
+      ...req.body,
+      accountType: req.body.accountType || 'shared'
+    })
+    await resourceVisibilityService.setAccountOwner(accountType, account.id, req.user)
+
+    res.status(201).json({
+      success: true,
+      data: {
+        ...account,
+        ownerUserId: req.user.id,
+        ownerUsername: req.user.username,
+        ownedByCurrentUser: true
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Create user account error:', error)
+    res.status(error.statusCode || 500).json({
+      error: 'Account creation error',
+      message: error.message || 'Failed to create account'
+    })
+  }
+})
+
+// 🔄 更新当前用户拥有的账号
+router.put('/accounts/:accountType/:accountId', authenticateUser, async (req, res) => {
+  try {
+    const accountType = resourceVisibilityService.normalizeAccountType(req.params.accountType)
+    const service = USER_ACCOUNT_SERVICES[accountType]
+    if (!service) {
+      return res.status(400).json({ error: 'Unsupported account type' })
+    }
+
+    const canManage = await resourceVisibilityService.canManageAccount(
+      req.user.id,
+      accountType,
+      req.params.accountId
+    )
+    if (!canManage) {
+      return res.status(403).json({ error: 'No permission to update this account' })
+    }
+
+    const updated = await service.update(req.params.accountId, req.body)
+    res.json({ success: true, data: updated })
+  } catch (error) {
+    logger.error('❌ Update user account error:', error)
+    res.status(error.statusCode || 500).json({
+      error: 'Account update error',
+      message: error.message || 'Failed to update account'
+    })
+  }
+})
+
+// 🗑️ 删除当前用户拥有的账号
+router.delete('/accounts/:accountType/:accountId', authenticateUser, async (req, res) => {
+  try {
+    const accountType = resourceVisibilityService.normalizeAccountType(req.params.accountType)
+    const service = USER_ACCOUNT_SERVICES[accountType]
+    if (!service) {
+      return res.status(400).json({ error: 'Unsupported account type' })
+    }
+
+    const owned = await resourceVisibilityService.isAccountOwnedByUser(
+      req.user.id,
+      accountType,
+      req.params.accountId
+    )
+    if (!owned) {
+      return res.status(403).json({ error: 'Only account owner can delete this account' })
+    }
+
+    await service.delete(req.params.accountId)
+    res.json({ success: true, message: 'Account deleted successfully' })
+  } catch (error) {
+    logger.error('❌ Delete user account error:', error)
+    res.status(error.statusCode || 500).json({
+      error: 'Account delete error',
+      message: error.message || 'Failed to delete account'
+    })
+  }
+})
+
+// 📁 用户自己的使用分组（调度分组）
+router.get('/account-groups', authenticateUser, async (req, res) => {
+  try {
+    const { platform } = req.query
+    const groups = await accountGroupService.getAllGroups(platform || null, {
+      ownerUserId: req.user.id
+    })
+    res.json({ success: true, data: groups })
+  } catch (error) {
+    logger.error('❌ Get user account groups error:', error)
+    res.status(500).json({ error: 'Failed to get account groups', message: error.message })
+  }
+})
+
+router.post('/account-groups', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.createGroup({
+      name: req.body.name,
+      platform: req.body.platform,
+      description: req.body.description || '',
+      ownerUserId: req.user.id,
+      ownerUsername: req.user.username,
+      createdByType: 'user'
+    })
+    res.status(201).json({ success: true, data: group })
+  } catch (error) {
+    logger.error('❌ Create user account group error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+router.put('/account-groups/:groupId', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.getGroup(req.params.groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(req.user.id, group)
+    const updated = await accountGroupService.updateGroup(req.params.groupId, req.body)
+    res.json({ success: true, data: updated })
+  } catch (error) {
+    logger.error('❌ Update user account group error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.delete('/account-groups/:groupId', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.getGroup(req.params.groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(req.user.id, group)
+    await accountGroupService.deleteGroup(req.params.groupId)
+    res.json({ success: true, message: 'Account group deleted successfully' })
+  } catch (error) {
+    logger.error('❌ Delete user account group error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.get('/account-groups/:groupId/members', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.getGroup(req.params.groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(req.user.id, group)
+    const members = await accountGroupService.getGroupMembers(req.params.groupId)
+    res.json({ success: true, data: members })
+  } catch (error) {
+    logger.error('❌ Get user account group members error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.post('/account-groups/:groupId/members', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.getGroup(req.params.groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(req.user.id, group)
+    const { accountId } = req.body
+    const accountPlatform = req.body.accountPlatform || group.platform
+    const accountType = req.body.accountType || accountPlatform
+    await resourceVisibilityService.assertCanUseAccount(req.user.id, accountType, accountId)
+    await accountGroupService.addAccountToGroup(accountId, req.params.groupId, accountPlatform)
+    res.json({ success: true, message: 'Account added to group successfully' })
+  } catch (error) {
+    logger.error('❌ Add user account group member error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.delete('/account-groups/:groupId/members/:accountId', authenticateUser, async (req, res) => {
+  try {
+    const group = await accountGroupService.getGroup(req.params.groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(req.user.id, group)
+    await accountGroupService.removeAccountFromGroup(
+      req.params.accountId,
+      req.params.groupId,
+      req.query.platform || group.platform
+    )
+    res.json({ success: true, message: 'Account removed from group successfully' })
+  } catch (error) {
+    logger.error('❌ Remove user account group member error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+// 🔐 权限分组
+router.get('/permission-groups', authenticateUser, async (req, res) => {
+  try {
+    const groups = await permissionGroupService.getUserGroups(req.user.id)
+    res.json({ success: true, data: groups })
+  } catch (error) {
+    logger.error('❌ Get permission groups error:', error)
+    res.status(500).json({ error: 'Failed to get permission groups', message: error.message })
+  }
+})
+
+router.post('/permission-groups', authenticateUser, async (req, res) => {
+  try {
+    const group = await permissionGroupService.createGroup(req.body, getUserActor(req))
+    res.status(201).json({ success: true, data: group })
+  } catch (error) {
+    logger.error('❌ Create permission group error:', error)
+    res.status(400).json({ error: error.message })
+  }
+})
+
+router.put('/permission-groups/:groupId', authenticateUser, async (req, res) => {
+  try {
+    const group = await permissionGroupService.updateGroup(
+      req.params.groupId,
+      req.body,
+      getUserActor(req)
+    )
+    res.json({ success: true, data: group })
+  } catch (error) {
+    logger.error('❌ Update permission group error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.delete('/permission-groups/:groupId', authenticateUser, async (req, res) => {
+  try {
+    await permissionGroupService.deleteGroup(req.params.groupId, getUserActor(req))
+    res.json({ success: true, message: 'Permission group deleted successfully' })
+  } catch (error) {
+    logger.error('❌ Delete permission group error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.get('/permission-groups/:groupId/members', authenticateUser, async (req, res) => {
+  try {
+    await permissionGroupService.assertCanManageGroup(req.params.groupId, getUserActor(req))
+    const members = await permissionGroupService.getMembers(req.params.groupId)
+    res.json({ success: true, data: members })
+  } catch (error) {
+    logger.error('❌ Get permission group members error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.post('/permission-groups/:groupId/members', authenticateUser, async (req, res) => {
+  try {
+    let user = null
+    if (req.body.userId) {
+      user = await userService.getUserById(req.body.userId, false)
+    } else if (req.body.username) {
+      user = await userService.getUserByUsername(req.body.username)
+    }
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+    const members = await permissionGroupService.addMember(
+      req.params.groupId,
+      user,
+      req.body.role || 'member',
+      getUserActor(req)
+    )
+    res.json({ success: true, data: members })
+  } catch (error) {
+    logger.error('❌ Add permission group member error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.delete('/permission-groups/:groupId/members/:userId', authenticateUser, async (req, res) => {
+  try {
+    const members = await permissionGroupService.removeMember(
+      req.params.groupId,
+      req.params.userId,
+      getUserActor(req)
+    )
+    res.json({ success: true, data: members })
+  } catch (error) {
+    logger.error('❌ Remove permission group member error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.get('/permission-groups/:groupId/accounts', authenticateUser, async (req, res) => {
+  try {
+    await permissionGroupService.assertCanManageGroup(req.params.groupId, getUserActor(req))
+    const accounts = await permissionGroupService.getAccounts(req.params.groupId)
+    res.json({ success: true, data: accounts })
+  } catch (error) {
+    logger.error('❌ Get permission group accounts error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.post('/permission-groups/:groupId/accounts', authenticateUser, async (req, res) => {
+  try {
+    const accounts = await permissionGroupService.addAccount(
+      req.params.groupId,
+      req.body.accountType,
+      req.body.accountId,
+      getUserActor(req)
+    )
+    res.json({ success: true, data: accounts })
+  } catch (error) {
+    logger.error('❌ Add permission group account error:', error)
+    res.status(error.statusCode || 400).json({ error: error.message })
+  }
+})
+
+router.delete(
+  '/permission-groups/:groupId/accounts/:accountType/:accountId',
+  authenticateUser,
+  async (req, res) => {
+    try {
+      const accounts = await permissionGroupService.removeAccount(
+        req.params.groupId,
+        req.params.accountType,
+        req.params.accountId,
+        getUserActor(req)
+      )
+      res.json({ success: true, data: accounts })
+    } catch (error) {
+      logger.error('❌ Remove permission group account error:', error)
+      res.status(error.statusCode || 400).json({ error: error.message })
+    }
+  }
+)
+
 // === 管理员用户管理端点 ===
 
 // 📋 获取用户列表（管理员）
@@ -491,6 +1115,58 @@ router.get('/', authenticateUserOrAdmin, requireAdmin, async (req, res) => {
     res.status(500).json({
       error: 'Users list error',
       message: 'Failed to retrieve users list'
+    })
+  }
+})
+
+// 👤 创建本地密码用户（管理员）
+router.post('/', authenticateUserOrAdmin, requireAdmin, async (req, res) => {
+  try {
+    if (getUserAuthMode() !== 'local') {
+      return res.status(400).json({
+        error: 'Unsupported operation',
+        message: 'Local user creation is only available in local auth mode'
+      })
+    }
+
+    const username = inputValidator.validateUsername(req.body.username)
+    inputValidator.validatePassword(req.body.password)
+
+    const email = req.body.email ? inputValidator.validateEmail(req.body.email) : ''
+    const displayName = req.body.displayName
+      ? inputValidator.validateDisplayName(req.body.displayName)
+      : username
+    const firstName = req.body.firstName ? String(req.body.firstName).trim() : ''
+    const lastName = req.body.lastName ? String(req.body.lastName).trim() : ''
+    const role = req.body.role || config.userManagement.defaultUserRole
+    if (!['user', 'admin'].includes(role)) {
+      return res.status(400).json({
+        error: 'Invalid role',
+        message: 'Role must be user or admin'
+      })
+    }
+
+    const user = await userService.createLocalUser({
+      username,
+      password: req.body.password,
+      email,
+      displayName,
+      firstName,
+      lastName,
+      role,
+      isActive: req.body.isActive !== false
+    })
+
+    res.status(201).json({
+      success: true,
+      message: 'Local user created successfully',
+      user
+    })
+  } catch (error) {
+    logger.error('❌ Create local user error:', error)
+    res.status(error.statusCode || 400).json({
+      error: 'User creation error',
+      message: error.message || 'Failed to create user'
     })
   }
 })
@@ -630,6 +1306,44 @@ router.patch('/:userId/role', authenticateUserOrAdmin, requireAdmin, async (req,
     res.status(500).json({
       error: 'Update role error',
       message: error.message || 'Failed to update user role'
+    })
+  }
+})
+
+// 🔐 重置本地用户密码（管理员）
+router.patch('/:userId/password', authenticateUserOrAdmin, requireAdmin, async (req, res) => {
+  try {
+    if (getUserAuthMode() !== 'local') {
+      return res.status(400).json({
+        error: 'Unsupported operation',
+        message: 'Password reset is only available in local auth mode'
+      })
+    }
+
+    const { userId } = req.params
+    const { password } = req.body
+    inputValidator.validatePassword(password)
+
+    const user = await userService.updateLocalUserPassword(userId, password)
+
+    const adminUser = req.admin?.username || req.user?.username
+    logger.info(`🔐 Admin ${adminUser} reset local password for user: ${user.username}`)
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      user: {
+        id: user.id,
+        username: user.username,
+        passwordUpdatedAt: user.passwordUpdatedAt,
+        updatedAt: user.updatedAt
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Reset local user password error:', error)
+    res.status(error.statusCode || 400).json({
+      error: 'Password reset error',
+      message: error.message || 'Failed to reset password'
     })
   }
 })

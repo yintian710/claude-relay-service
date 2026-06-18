@@ -1,5 +1,6 @@
 const droidAccountService = require('../account/droidAccountService')
 const accountGroupService = require('../accountGroupService')
+const resourceVisibilityService = require('../resourceVisibilityService')
 const redis = require('../../models/redis')
 const logger = require('../../utils/logger')
 const upstreamErrorHelper = require('../../utils/upstreamErrorHelper')
@@ -41,7 +42,9 @@ class DroidScheduler {
     return `${this.STICKY_PREFIX}:${normalizedEndpoint}:${apiKeyPart}:${sessionHash}`
   }
 
-  async _loadGroupAccounts(groupId) {
+  async _loadGroupAccounts(groupId, apiKeyData = null) {
+    const group = await accountGroupService.getGroup(groupId)
+    await resourceVisibilityService.assertCanUseAccountGroup(apiKeyData?.userId, group)
     const memberIds = await accountGroupService.getGroupMembers(groupId)
     if (!memberIds || memberIds.length === 0) {
       return []
@@ -72,7 +75,7 @@ class DroidScheduler {
       }
       result.push(account)
     }
-    return result
+    return await resourceVisibilityService.filterVisibleAccounts(apiKeyData?.userId, result, 'droid')
   }
 
   async _ensureLastUsedUpdated(accountId) {
@@ -108,10 +111,11 @@ class DroidScheduler {
         logger.info(
           `🤖 API Key ${apiKeyData.name || apiKeyData.id} 绑定 Droid 分组 ${groupId}，按分组调度`
         )
-        candidates = await this._loadGroupAccounts(groupId, normalizedEndpoint)
+        candidates = await this._loadGroupAccounts(groupId, apiKeyData)
       } else {
         const account = await droidAccountService.getAccount(binding)
         if (account) {
+          await resourceVisibilityService.assertCanUseAccount(apiKeyData?.userId, 'droid', binding)
           const isTempUnavailable = await upstreamErrorHelper.isTempUnavailable(account.id, 'droid')
           if (isTempUnavailable) {
             logger.warn(
@@ -128,6 +132,11 @@ class DroidScheduler {
     if (!candidates || candidates.length === 0) {
       candidates = await droidAccountService.getSchedulableAccounts(normalizedEndpoint)
     }
+    candidates = await resourceVisibilityService.filterVisibleAccounts(
+      apiKeyData?.userId,
+      candidates,
+      'droid'
+    )
 
     const syncFiltered = candidates.filter(
       (account) =>

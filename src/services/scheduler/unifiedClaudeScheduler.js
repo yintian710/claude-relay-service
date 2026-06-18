@@ -3,6 +3,7 @@ const claudeConsoleAccountService = require('../account/claudeConsoleAccountServ
 const bedrockAccountService = require('../account/bedrockAccountService')
 const ccrAccountService = require('../account/ccrAccountService')
 const accountGroupService = require('../accountGroupService')
+const resourceVisibilityService = require('../resourceVisibilityService')
 const redis = require('../../models/redis')
 const logger = require('../../utils/logger')
 const { parseVendorPrefixedModel, isOpus45OrNewer } = require('../../utils/modelHelper')
@@ -251,7 +252,8 @@ class UnifiedClaudeScheduler {
             groupId,
             sessionHash,
             effectiveModel,
-            vendor === 'ccr'
+            vendor === 'ccr',
+            apiKeyData
           )
         }
 
@@ -288,6 +290,11 @@ class UnifiedClaudeScheduler {
               }
               logger.info(
                 `🎯 Using bound dedicated Claude OAuth account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`
+              )
+              await resourceVisibilityService.assertCanUseAccount(
+                apiKeyData.userId,
+                'claude',
+                apiKeyData.claudeAccountId
               )
               return {
                 accountId: apiKeyData.claudeAccountId,
@@ -326,6 +333,11 @@ class UnifiedClaudeScheduler {
             logger.info(
               `🎯 Using bound dedicated Claude Console account: ${boundConsoleAccount.name} (${apiKeyData.claudeConsoleAccountId}) for API key ${apiKeyData.name}`
             )
+            await resourceVisibilityService.assertCanUseAccount(
+              apiKeyData.userId,
+              'claude-console',
+              apiKeyData.claudeConsoleAccountId
+            )
             return {
               accountId: apiKeyData.claudeConsoleAccountId,
               accountType: 'claude-console'
@@ -361,6 +373,11 @@ class UnifiedClaudeScheduler {
             logger.info(
               `🎯 Using bound dedicated Bedrock account: ${boundBedrockAccountResult.data.name} (${apiKeyData.bedrockAccountId}) for API key ${apiKeyData.name}`
             )
+            await resourceVisibilityService.assertCanUseAccount(
+              apiKeyData.userId,
+              'bedrock',
+              apiKeyData.bedrockAccountId
+            )
             return {
               accountId: apiKeyData.bedrockAccountId,
               accountType: 'bedrock'
@@ -392,7 +409,12 @@ class UnifiedClaudeScheduler {
               mappedAccount.accountType,
               effectiveModel
             )
-            if (isAvailable) {
+            const isVisible = await resourceVisibilityService.canUseAccount(
+              apiKeyData.userId,
+              mappedAccount.accountType,
+              mappedAccount.accountId
+            )
+            if (isAvailable && isVisible) {
               // 🚀 智能会话续期：剩余时间少于14天时自动续期到15天（续期正确的 unified 映射键）
               await this._extendSessionMappingTTL(sessionHash)
               logger.info(
@@ -975,6 +997,13 @@ class UnifiedClaudeScheduler {
       // 否则走通用的"无可用账户"错误处理（由上层 selectAccountForApiKey 捕获）
     }
 
+    if (apiKeyData?.userId) {
+      return await resourceVisibilityService.filterVisibleAccountSelections(
+        apiKeyData.userId,
+        availableAccounts
+      )
+    }
+
     return availableAccounts
   }
 
@@ -1463,7 +1492,8 @@ class UnifiedClaudeScheduler {
     groupId,
     sessionHash = null,
     requestedModel = null,
-    allowCcr = false
+    allowCcr = false,
+    apiKeyData = null
   ) {
     try {
       // 获取分组信息
@@ -1471,6 +1501,7 @@ class UnifiedClaudeScheduler {
       if (!group) {
         throw new Error(`Group ${groupId} not found`)
       }
+      await resourceVisibilityService.assertCanUseAccountGroup(apiKeyData?.userId, group)
 
       logger.info(`👥 Selecting account from group: ${group.name} (${group.platform})`)
 
@@ -1490,7 +1521,12 @@ class UnifiedClaudeScheduler {
                 mappedAccount.accountType,
                 requestedModel
               )
-              if (isAvailable) {
+              const isVisible = await resourceVisibilityService.canUseAccount(
+                apiKeyData?.userId,
+                mappedAccount.accountType,
+                mappedAccount.accountId
+              )
+              if (isAvailable && isVisible) {
                 // 🚀 智能会话续期：续期 unified 映射键
                 await this._extendSessionMappingTTL(sessionHash)
                 logger.info(
@@ -1621,8 +1657,18 @@ class UnifiedClaudeScheduler {
         throw new Error(`No available accounts in group ${group.name}`)
       }
 
+      const visibleAccounts = apiKeyData?.userId
+        ? await resourceVisibilityService.filterVisibleAccountSelections(
+            apiKeyData.userId,
+            availableAccounts
+          )
+        : availableAccounts
+      if (visibleAccounts.length === 0) {
+        throw new Error(`No visible accounts in group ${group.name}`)
+      }
+
       // 使用现有的优先级排序逻辑
-      const sortedAccounts = sortAccountsByPriority(availableAccounts)
+      const sortedAccounts = sortAccountsByPriority(visibleAccounts)
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]
@@ -1666,7 +1712,12 @@ class UnifiedClaudeScheduler {
             mappedAccount.accountType,
             effectiveModel
           )
-          if (isAvailable) {
+          const isVisible = await resourceVisibilityService.canUseAccount(
+            apiKeyData?.userId,
+            mappedAccount.accountType,
+            mappedAccount.accountId
+          )
+          if (isAvailable && isVisible) {
             // 🚀 智能会话续期：续期 unified 映射键
             await this._extendSessionMappingTTL(sessionHash)
             logger.info(
@@ -1683,7 +1734,7 @@ class UnifiedClaudeScheduler {
       }
 
       // 2. 获取所有可用的CCR账户
-      const availableCcrAccounts = await this._getAvailableCcrAccounts(effectiveModel)
+      const availableCcrAccounts = await this._getAvailableCcrAccounts(effectiveModel, apiKeyData)
 
       if (availableCcrAccounts.length === 0) {
         throw new Error(
@@ -1722,7 +1773,7 @@ class UnifiedClaudeScheduler {
   }
 
   // 📋 获取所有可用的CCR账户
-  async _getAvailableCcrAccounts(requestedModel = null) {
+  async _getAvailableCcrAccounts(requestedModel = null, apiKeyData = null) {
     const availableAccounts = []
 
     try {
@@ -1786,6 +1837,13 @@ class UnifiedClaudeScheduler {
       }
 
       logger.info(`📊 Total available CCR accounts: ${availableAccounts.length}`)
+      if (apiKeyData?.userId) {
+        return await resourceVisibilityService.filterVisibleAccountSelections(
+          apiKeyData.userId,
+          availableAccounts
+        )
+      }
+
       return availableAccounts
     } catch (error) {
       logger.error('❌ Failed to get available CCR accounts:', error)

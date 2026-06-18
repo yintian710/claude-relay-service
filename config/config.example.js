@@ -184,10 +184,15 @@ const config = {
   // 👥 用户管理配置
   userManagement: {
     enabled: process.env.USER_MANAGEMENT_ENABLED === 'true',
+    authMode:
+      process.env.USER_AUTH_MODE ||
+      (process.env.LDAP_ENABLED === 'true' ? 'ldap' : 'local'), // local | ldap，后续可扩展 sso-cookie
     defaultUserRole: process.env.DEFAULT_USER_ROLE || 'user',
     userSessionTimeout: parseInt(process.env.USER_SESSION_TIMEOUT) || 86400000, // 24小时
     maxApiKeysPerUser: parseInt(process.env.MAX_API_KEYS_PER_USER) || 1,
-    allowUserDeleteApiKeys: process.env.ALLOW_USER_DELETE_API_KEYS === 'true' // 默认不允许用户删除自己的API Keys
+    allowUserDeleteApiKeys: process.env.ALLOW_USER_DELETE_API_KEYS === 'true', // 默认不允许用户删除自己的API Keys
+    localAuthAutoCreateUsers: process.env.LOCAL_AUTH_AUTO_CREATE_USERS === 'true',
+    localPasswordBcryptRounds: parseInt(process.env.LOCAL_PASSWORD_BCRYPT_ROUNDS) || 12
   },
 
   // 📢 Webhook通知配置

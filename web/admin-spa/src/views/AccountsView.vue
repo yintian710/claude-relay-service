@@ -1,6 +1,270 @@
 <template>
   <div class="accounts-container">
-    <div class="card p-4 sm:p-6">
+    <div v-if="isUserMode" class="card p-4 sm:p-6">
+      <div class="mb-4 flex flex-col gap-4 sm:mb-6">
+        <div>
+          <h3 class="mb-1 text-lg font-bold text-gray-900 dark:text-gray-100 sm:mb-2 sm:text-xl">
+            账户管理
+          </h3>
+          <p class="text-sm text-gray-600 dark:text-gray-400 sm:text-base">
+            管理你创建或权限组共享给你的账户、使用分组和权限分组
+          </p>
+        </div>
+
+        <div class="border-b border-gray-200 dark:border-gray-700">
+          <nav aria-label="Tabs" class="-mb-px flex flex-wrap gap-6">
+            <button
+              v-for="tab in userResourceTabs"
+              :key="tab.key"
+              :class="[
+                'whitespace-nowrap border-b-2 px-1 py-2 text-sm font-medium',
+                userResourceTab === tab.key
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-300'
+              ]"
+              @click="userResourceTab = tab.key"
+            >
+              {{ tab.label }}
+            </button>
+          </nav>
+        </div>
+      </div>
+
+      <div v-if="userResourcesLoading" class="py-10 text-center text-sm text-gray-500">
+        加载中...
+      </div>
+
+      <div v-else-if="userResourceTab === 'accounts'" class="space-y-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 class="text-base font-bold text-gray-900 dark:text-gray-100">可见账户</h4>
+            <p class="text-sm text-gray-600 dark:text-gray-400">自己创建的账户和权限组共享账户</p>
+          </div>
+          <button
+            class="btn btn-primary px-4 py-2"
+            @click="userShowCreateAccount = !userShowCreateAccount"
+          >
+            {{ userShowCreateAccount ? '取消' : '创建账户' }}
+          </button>
+        </div>
+
+        <div
+          v-if="userShowCreateAccount"
+          class="rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+        >
+          <div class="grid gap-3 md:grid-cols-3">
+            <select v-model="userCreateAccountForm.accountType" class="form-input w-full">
+              <option value="claude">Claude</option>
+              <option value="claude-console">Claude Console</option>
+              <option value="gemini">Gemini</option>
+              <option value="gemini-api">Gemini API</option>
+              <option value="openai">OpenAI</option>
+              <option value="openai-responses">OpenAI Responses</option>
+              <option value="azure-openai">Azure OpenAI</option>
+              <option value="droid">Droid</option>
+              <option value="bedrock">Bedrock</option>
+            </select>
+            <input
+              v-model="userCreateAccountForm.name"
+              class="form-input w-full"
+              placeholder="账户名称"
+            />
+            <button
+              class="btn btn-primary px-4 py-2"
+              :disabled="userCreatingAccount || !userCreateAccountForm.name.trim()"
+              @click="createUserVisibleAccount"
+            >
+              {{ userCreatingAccount ? '创建中...' : '创建' }}
+            </button>
+          </div>
+          <textarea
+            v-model="userCreateAccountForm.extraJson"
+            class="form-input mt-3 h-28 w-full font-mono text-xs"
+            placeholder='可选 JSON，例如 {"refreshToken":"..."}'
+          />
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div
+            v-for="account in userFlattenedAccounts"
+            :key="`${account.accountType}:${account.id}`"
+            class="rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h4 class="truncate font-semibold text-gray-900 dark:text-gray-100">
+                  {{ account.name }}
+                </h4>
+                <p class="mt-1 text-xs text-gray-500">
+                  {{ account.accountType }} · {{ account.status || 'unknown' }}
+                </p>
+              </div>
+              <span class="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                {{ account.ownedByCurrentUser ? 'Owner' : 'Shared' }}
+              </span>
+            </div>
+            <p class="mt-3 truncate text-xs text-gray-400">ID: {{ account.id }}</p>
+          </div>
+        </div>
+        <div
+          v-if="userFlattenedAccounts.length === 0"
+          class="py-10 text-center text-sm text-gray-500"
+        >
+          暂无可见账户
+        </div>
+      </div>
+
+      <div v-else-if="userResourceTab === 'account-groups'" class="space-y-4">
+        <div class="grid gap-3 md:grid-cols-4">
+          <input
+            v-model="userCreateUseGroupForm.name"
+            class="form-input w-full"
+            placeholder="使用分组名称"
+          />
+          <select v-model="userCreateUseGroupForm.platform" class="form-input w-full">
+            <option value="claude">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="openai">OpenAI</option>
+            <option value="droid">Droid</option>
+          </select>
+          <input
+            v-model="userCreateUseGroupForm.description"
+            class="form-input w-full"
+            placeholder="描述"
+          />
+          <button
+            class="btn btn-primary px-4 py-2"
+            :disabled="!userCreateUseGroupForm.name.trim()"
+            @click="createUserUseGroup"
+          >
+            创建使用分组
+          </button>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div
+            v-for="group in userAccountGroups"
+            :key="group.id"
+            class="rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-gray-900 dark:text-gray-100">{{ group.name }}</h4>
+                <p class="mt-1 text-xs text-gray-500">
+                  {{ group.platform }} · {{ group.memberCount || 0 }} accounts
+                </p>
+              </div>
+              <button class="text-xs text-red-600" @click="deleteUserUseGroup(group.id)">
+                删除
+              </button>
+            </div>
+            <div class="mt-3 flex gap-2">
+              <select
+                v-model="userSelectedUseGroupAccounts[group.id]"
+                class="form-input min-w-0 flex-1"
+              >
+                <option value="">选择可见账户</option>
+                <option
+                  v-for="account in userAccountsForPlatform(group.platform)"
+                  :key="`${account.accountType}:${account.id}`"
+                  :value="`${account.accountType}|${account.id}`"
+                >
+                  {{ account.name }} ({{ account.accountType }})
+                </option>
+              </select>
+              <button class="btn btn-primary px-3 py-2" @click="addUserUseGroupMember(group)">
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-if="userAccountGroups.length === 0" class="py-10 text-center text-sm text-gray-500">
+          暂无使用分组
+        </div>
+      </div>
+
+      <div v-else class="space-y-4">
+        <div class="grid gap-3 md:grid-cols-3">
+          <input
+            v-model="userCreatePermissionGroupForm.name"
+            class="form-input w-full"
+            placeholder="权限分组名称"
+          />
+          <input
+            v-model="userCreatePermissionGroupForm.description"
+            class="form-input w-full"
+            placeholder="描述"
+          />
+          <button
+            class="btn btn-primary px-4 py-2"
+            :disabled="!userCreatePermissionGroupForm.name.trim()"
+            @click="createUserPermissionGroup"
+          >
+            创建权限分组
+          </button>
+        </div>
+
+        <div class="grid gap-4 lg:grid-cols-2">
+          <div
+            v-for="group in userPermissionGroups"
+            :key="group.id"
+            class="rounded-xl border border-gray-200 p-4 dark:border-gray-700"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="font-semibold text-gray-900 dark:text-gray-100">{{ group.name }}</h4>
+                <p class="mt-1 text-xs text-gray-500">
+                  {{ group.currentUserRole }} · {{ group.memberCount || 0 }} users ·
+                  {{ group.accountCount || 0 }} accounts
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-3 grid gap-2 md:grid-cols-3">
+              <input
+                v-model="userPermissionMemberForms[group.id]"
+                class="form-input w-full"
+                placeholder="用户名"
+              />
+              <select v-model="userPermissionMemberRoles[group.id]" class="form-input w-full">
+                <option value="member">member</option>
+                <option value="manager">manager</option>
+              </select>
+              <button class="btn btn-primary px-3 py-2" @click="addUserPermissionMember(group)">
+                邀请
+              </button>
+            </div>
+
+            <div class="mt-3 flex gap-2">
+              <select
+                v-model="userPermissionAccountForms[group.id]"
+                class="form-input min-w-0 flex-1"
+              >
+                <option value="">选择要共享的账户</option>
+                <option
+                  v-for="account in userOwnedAccounts"
+                  :key="`${account.accountType}:${account.id}`"
+                  :value="`${account.accountType}|${account.id}`"
+                >
+                  {{ account.name }} ({{ account.accountType }})
+                </option>
+              </select>
+              <button class="btn btn-primary px-3 py-2" @click="shareUserPermissionAccount(group)">
+                共享
+              </button>
+            </div>
+          </div>
+        </div>
+        <div
+          v-if="userPermissionGroups.length === 0"
+          class="py-10 text-center text-sm text-gray-500"
+        >
+          暂无权限分组
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="card p-4 sm:p-6">
       <div class="mb-4 flex flex-col gap-4 sm:mb-6">
         <div>
           <h3 class="mb-1 text-lg font-bold text-gray-900 dark:text-gray-100 sm:mb-2 sm:text-xl">
@@ -2257,10 +2521,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, reactive } from 'vue'
 import { showToast, copyText, formatNumber, formatRelativeTime } from '@/utils/tools'
 
 import * as httpApis from '@/utils/http_apis'
+import { useAuthStore } from '@/stores/auth'
+import { useUserStore } from '@/stores/user'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import CcrAccountForm from '@/components/accounts/CcrAccountForm.vue'
 import AccountUsageDetailModal from '@/components/accounts/AccountUsageDetailModal.vue'
@@ -2274,6 +2540,191 @@ import ActionDropdown from '@/components/common/ActionDropdown.vue'
 import GroupManagementModal from '@/components/accounts/GroupManagementModal.vue'
 import BalanceDisplay from '@/components/accounts/BalanceDisplay.vue'
 import AccountBalanceScriptModal from '@/components/accounts/AccountBalanceScriptModal.vue'
+
+const authStore = useAuthStore()
+const userStore = useUserStore()
+const isUserMode = computed(() => userStore.isAuthenticated && !authStore.isAuthenticated)
+
+const userResourceTab = ref('accounts')
+const userResourcesLoading = ref(false)
+const userVisibleAccountsByType = ref({})
+const userAccountGroups = ref([])
+const userPermissionGroups = ref([])
+const userShowCreateAccount = ref(false)
+const userCreatingAccount = ref(false)
+const userResourceTabs = [
+  { key: 'accounts', label: '账户' },
+  { key: 'account-groups', label: '使用分组' },
+  { key: 'permission-groups', label: '权限分组' }
+]
+const userCreateAccountForm = reactive({ accountType: 'claude', name: '', extraJson: '' })
+const userCreateUseGroupForm = reactive({ name: '', platform: 'claude', description: '' })
+const userCreatePermissionGroupForm = reactive({ name: '', description: '' })
+const userSelectedUseGroupAccounts = reactive({})
+const userPermissionMemberForms = reactive({})
+const userPermissionMemberRoles = reactive({})
+const userPermissionAccountForms = reactive({})
+
+const userFlattenedAccounts = computed(() =>
+  Object.entries(userVisibleAccountsByType.value).flatMap(([accountType, accountList]) =>
+    (accountList || []).map((account) => ({ ...account, accountType }))
+  )
+)
+const userOwnedAccounts = computed(() =>
+  userFlattenedAccounts.value.filter((account) => account.ownedByCurrentUser)
+)
+const userAccountPlatformMap = {
+  claude: 'claude',
+  'claude-console': 'claude',
+  bedrock: 'claude',
+  gemini: 'gemini',
+  'gemini-api': 'gemini',
+  openai: 'openai',
+  'openai-responses': 'openai',
+  'azure-openai': 'openai',
+  droid: 'droid'
+}
+const userAccountsForPlatform = (platform) =>
+  userFlattenedAccounts.value.filter(
+    (account) => userAccountPlatformMap[account.accountType] === platform
+  )
+
+const loadUserResources = async () => {
+  userResourcesLoading.value = true
+  try {
+    const [visibleAccounts, accountGroupList, permissionGroupList] = await Promise.all([
+      userStore.getVisibleAccounts(),
+      userStore.getAccountGroups(),
+      userStore.getPermissionGroups()
+    ])
+    userVisibleAccountsByType.value = visibleAccounts
+    userAccountGroups.value = accountGroupList
+    userPermissionGroups.value = permissionGroupList
+  } catch (error) {
+    showToast(error.response?.data?.message || '加载账户数据失败', 'error')
+  } finally {
+    userResourcesLoading.value = false
+  }
+}
+
+const createUserVisibleAccount = async () => {
+  userCreatingAccount.value = true
+  try {
+    let extra = {}
+    if (userCreateAccountForm.extraJson.trim()) {
+      extra = JSON.parse(userCreateAccountForm.extraJson)
+    }
+    const result = await userStore.createAccount(userCreateAccountForm.accountType, {
+      ...extra,
+      name: userCreateAccountForm.name.trim()
+    })
+    if (result.success) {
+      showToast('账户已创建', 'success')
+      userCreateAccountForm.name = ''
+      userCreateAccountForm.extraJson = ''
+      userShowCreateAccount.value = false
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.message || error.message || '创建账户失败', 'error')
+  } finally {
+    userCreatingAccount.value = false
+  }
+}
+
+const createUserUseGroup = async () => {
+  try {
+    const result = await userStore.createAccountGroup({ ...userCreateUseGroupForm })
+    if (result.success) {
+      showToast('使用分组已创建', 'success')
+      userCreateUseGroupForm.name = ''
+      userCreateUseGroupForm.description = ''
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '创建使用分组失败', 'error')
+  }
+}
+
+const addUserUseGroupMember = async (group) => {
+  const value = userSelectedUseGroupAccounts[group.id]
+  if (!value) return
+  const [accountType, accountId] = value.split('|')
+  try {
+    const result = await userStore.addAccountGroupMember(group.id, {
+      accountType,
+      accountPlatform: group.platform,
+      accountId
+    })
+    if (result.success) {
+      showToast('账户已加入使用分组', 'success')
+      userSelectedUseGroupAccounts[group.id] = ''
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '添加账户失败', 'error')
+  }
+}
+
+const deleteUserUseGroup = async (groupId) => {
+  try {
+    const result = await userStore.deleteAccountGroup(groupId)
+    if (result.success) {
+      showToast('使用分组已删除', 'success')
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '删除使用分组失败', 'error')
+  }
+}
+
+const createUserPermissionGroup = async () => {
+  try {
+    const result = await userStore.createPermissionGroup({ ...userCreatePermissionGroupForm })
+    if (result.success) {
+      showToast('权限分组已创建', 'success')
+      userCreatePermissionGroupForm.name = ''
+      userCreatePermissionGroupForm.description = ''
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '创建权限分组失败', 'error')
+  }
+}
+
+const addUserPermissionMember = async (group) => {
+  const username = userPermissionMemberForms[group.id]
+  if (!username) return
+  try {
+    const result = await userStore.addPermissionGroupMember(group.id, {
+      username,
+      role: userPermissionMemberRoles[group.id] || 'member'
+    })
+    if (result.success) {
+      showToast('成员已加入权限分组', 'success')
+      userPermissionMemberForms[group.id] = ''
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '邀请成员失败', 'error')
+  }
+}
+
+const shareUserPermissionAccount = async (group) => {
+  const value = userPermissionAccountForms[group.id]
+  if (!value) return
+  const [accountType, accountId] = value.split('|')
+  try {
+    const result = await userStore.addPermissionGroupAccount(group.id, { accountType, accountId })
+    if (result.success) {
+      showToast('账户已共享', 'success')
+      userPermissionAccountForms[group.id] = ''
+      await loadUserResources()
+    }
+  } catch (error) {
+    showToast(error.response?.data?.error || '共享账户失败', 'error')
+  }
+}
 
 // 确认弹窗状态
 const showConfirmModal = ref(false)
@@ -5238,6 +5689,11 @@ let resizeObserver = null
 let tempUnavailableCountdownTimer = null
 
 onMounted(() => {
+  if (isUserMode.value) {
+    loadUserResources()
+    return
+  }
+
   // 首次加载时强制刷新所有数据
   loadAccounts(true)
 

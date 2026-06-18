@@ -1,6 +1,7 @@
 const geminiAccountService = require('../account/geminiAccountService')
 const geminiApiAccountService = require('../account/geminiApiAccountService')
 const accountGroupService = require('../accountGroupService')
+const resourceVisibilityService = require('../resourceVisibilityService')
 const redis = require('../../models/redis')
 const logger = require('../../utils/logger')
 const { isSchedulable, isActive, sortAccountsByPriority } = require('../../utils/commonHelper')
@@ -72,6 +73,11 @@ class UnifiedGeminiScheduler {
             logger.info(
               `🎯 Using bound Gemini-API account: ${boundAccount.name} (${accountId}) for API key ${apiKeyData.name}`
             )
+            await resourceVisibilityService.assertCanUseAccount(
+              apiKeyData.userId,
+              'gemini-api',
+              accountId
+            )
             // 更新账户的最后使用时间
             await geminiApiAccountService.markAccountUsed(accountId)
             return {
@@ -117,6 +123,11 @@ class UnifiedGeminiScheduler {
               logger.info(
                 `🎯 Using bound dedicated Gemini account: ${boundAccount.name} (${apiKeyData.geminiAccountId}) for API key ${apiKeyData.name}`
               )
+              await resourceVisibilityService.assertCanUseAccount(
+                apiKeyData.userId,
+                'gemini',
+                apiKeyData.geminiAccountId
+              )
               // 更新账户的最后使用时间
               await geminiAccountService.markAccountUsed(apiKeyData.geminiAccountId)
               return {
@@ -141,7 +152,12 @@ class UnifiedGeminiScheduler {
             mappedAccount.accountId,
             mappedAccount.accountType
           )
-          if (isAvailable) {
+          const isVisible = await resourceVisibilityService.canUseAccount(
+            apiKeyData.userId,
+            mappedAccount.accountType,
+            mappedAccount.accountId
+          )
+          if (isAvailable && isVisible) {
             // 🚀 智能会话续期（续期 unified 映射键，按配置）
             await this._extendSessionMappingTTL(sessionHash, normalizedOauthProvider)
             logger.info(
@@ -267,6 +283,12 @@ class UnifiedGeminiScheduler {
                 logger.warn(
                   `⚠️ Bound Gemini-API account ${boundAccount.name} does not support model ${requestedModel}`
                 )
+                if (apiKeyData?.userId) {
+                  return await resourceVisibilityService.filterVisibleAccountSelections(
+                    apiKeyData.userId,
+                    availableAccounts
+                  )
+                }
                 return availableAccounts
               }
             }
@@ -306,6 +328,12 @@ class UnifiedGeminiScheduler {
             normalizedOauthProvider &&
             normalizeOauthProvider(boundAccount.oauthProvider) !== normalizedOauthProvider
           ) {
+            if (apiKeyData?.userId) {
+              return await resourceVisibilityService.filterVisibleAccountSelections(
+                apiKeyData.userId,
+                availableAccounts
+              )
+            }
             return availableAccounts
           }
           const isTempUnavailable = await upstreamErrorHelper.isTempUnavailable(
@@ -334,6 +362,12 @@ class UnifiedGeminiScheduler {
                 logger.warn(
                   `⚠️ Bound Gemini account ${boundAccount.name} does not support model ${requestedModel}`
                 )
+                if (apiKeyData?.userId) {
+                  return await resourceVisibilityService.filterVisibleAccountSelections(
+                    apiKeyData.userId,
+                    availableAccounts
+                  )
+                }
                 return availableAccounts
               }
             }
@@ -471,6 +505,13 @@ class UnifiedGeminiScheduler {
     logger.info(
       `📊 Total available accounts: ${availableAccounts.length} (Gemini OAuth + ${allowApiAccounts ? 'Gemini API' : 'no API accounts'})`
     )
+    if (apiKeyData?.userId) {
+      return await resourceVisibilityService.filterVisibleAccountSelections(
+        apiKeyData.userId,
+        availableAccounts
+      )
+    }
+
     return availableAccounts
   }
 
@@ -696,7 +737,7 @@ class UnifiedGeminiScheduler {
   }
 
   // 👥 从分组中选择账户（支持 Gemini OAuth 和 Gemini API 两种账户类型）
-  async selectAccountFromGroup(groupId, sessionHash = null, requestedModel = null) {
+  async selectAccountFromGroup(groupId, sessionHash = null, requestedModel = null, apiKeyData = null) {
     try {
       // 获取分组信息
       const group = await accountGroupService.getGroup(groupId)
@@ -707,6 +748,7 @@ class UnifiedGeminiScheduler {
       if (group.platform !== 'gemini') {
         throw new Error(`Group ${group.name} is not a Gemini group`)
       }
+      await resourceVisibilityService.assertCanUseAccountGroup(apiKeyData?.userId, group)
 
       logger.info(`👥 Selecting account from Gemini group: ${group.name}`)
 
@@ -721,7 +763,12 @@ class UnifiedGeminiScheduler {
               mappedAccount.accountId,
               mappedAccount.accountType
             )
-            if (isAvailable) {
+            const isVisible = await resourceVisibilityService.canUseAccount(
+              apiKeyData?.userId,
+              mappedAccount.accountType,
+              mappedAccount.accountId
+            )
+            if (isAvailable && isVisible) {
               // 🚀 智能会话续期（续期 unified 映射键，按配置）
               await this._extendSessionMappingTTL(sessionHash)
               logger.info(
@@ -824,8 +871,18 @@ class UnifiedGeminiScheduler {
         throw new Error(`No available accounts in Gemini group ${group.name}`)
       }
 
+      const visibleAccounts = apiKeyData?.userId
+        ? await resourceVisibilityService.filterVisibleAccountSelections(
+            apiKeyData.userId,
+            availableAccounts
+          )
+        : availableAccounts
+      if (visibleAccounts.length === 0) {
+        throw new Error(`No visible accounts in Gemini group ${group.name}`)
+      }
+
       // 使用现有的优先级排序逻辑
-      const sortedAccounts = sortAccountsByPriority(availableAccounts)
+      const sortedAccounts = sortAccountsByPriority(visibleAccounts)
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]

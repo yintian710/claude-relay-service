@@ -5,8 +5,6 @@ import { APP_CONFIG, showToast } from '@/utils/tools'
 
 // 路由懒加载
 const LoginView = () => import('@/views/LoginView.vue')
-const UserLoginView = () => import('@/views/UserLoginView.vue')
-const UserDashboardView = () => import('@/views/UserDashboardView.vue')
 const UserManagementView = () => import('@/views/UserManagementView.vue')
 const MainLayout = () => import('@/components/layout/MainLayout.vue')
 const DashboardView = () => import('@/views/DashboardView.vue')
@@ -49,14 +47,12 @@ const routes = [
   {
     path: '/user-login',
     name: 'UserLogin',
-    component: UserLoginView,
+    component: LoginView,
     meta: { requiresAuth: false, userAuth: true }
   },
   {
     path: '/user-dashboard',
-    name: 'UserDashboard',
-    component: UserDashboardView,
-    meta: { requiresUserAuth: true }
+    redirect: '/dashboard'
   },
   {
     path: '/api-stats',
@@ -67,7 +63,7 @@ const routes = [
   {
     path: '/dashboard',
     component: MainLayout,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, allowUserAuth: true },
     children: [
       {
         path: '',
@@ -79,7 +75,7 @@ const routes = [
   {
     path: '/api-keys',
     component: MainLayout,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, allowUserAuth: true },
     children: [
       {
         path: '',
@@ -91,7 +87,7 @@ const routes = [
   {
     path: '/api-keys/:keyId/usage-records',
     component: MainLayout,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, allowUserAuth: true },
     children: [
       {
         path: '',
@@ -103,7 +99,7 @@ const routes = [
   {
     path: '/accounts',
     component: MainLayout,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, allowUserAuth: true },
     children: [
       {
         path: '',
@@ -188,6 +184,7 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   const userStore = useUserStore()
+  authStore.checkAuth()
 
   console.log('路由导航:', {
     to: to.path,
@@ -204,37 +201,35 @@ router.beforeEach(async (to, from, next) => {
     return next()
   }
 
-  // 检查用户认证状态
-  if (to.meta.requiresUserAuth) {
-    if (!userStore.isAuthenticated) {
-      // 尝试检查本地存储的认证信息
-      try {
-        const isUserLoggedIn = await userStore.checkAuth()
-        if (!isUserLoggedIn) {
-          return next('/user-login')
-        }
-      } catch (error) {
-        // If the error is about disabled account, redirect to login with error
-        if (error.message && error.message.includes('disabled')) {
-          showToast(error.message, 'error')
-        }
-        return next('/user-login')
-      }
-    }
-    return next()
-  }
-
   // API Stats 页面不需要认证，直接放行
   if (to.path === '/api-stats' || to.path.startsWith('/api-stats')) {
     next()
   } else if (to.path === '/user-login') {
-    // 如果已经是用户登录状态，重定向到用户仪表板
-    if (userStore.isAuthenticated) {
-      next('/user-dashboard')
+    // 如果已经是用户登录状态，进入原有仪表板
+    const isUserLoggedIn = userStore.isAuthenticated || (await userStore.checkAuth())
+    if (isUserLoggedIn) {
+      next('/dashboard')
     } else {
       next()
     }
   } else if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    if (!to.meta.allowUserAuth) {
+      next('/login')
+      return
+    }
+
+    try {
+      const isUserLoggedIn = userStore.isAuthenticated || (await userStore.checkAuth())
+      if (isUserLoggedIn) {
+        next()
+        return
+      }
+    } catch (error) {
+      if (error.message && error.message.includes('disabled')) {
+        showToast(error.message, 'error')
+      }
+    }
+
     next('/login')
   } else if (to.path === '/login' && authStore.isAuthenticated) {
     next('/dashboard')

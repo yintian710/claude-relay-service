@@ -1,6 +1,7 @@
 const openaiAccountService = require('../account/openaiAccountService')
 const openaiResponsesAccountService = require('../account/openaiResponsesAccountService')
 const accountGroupService = require('../accountGroupService')
+const resourceVisibilityService = require('../resourceVisibilityService')
 const redis = require('../../models/redis')
 const logger = require('../../utils/logger')
 const { isSchedulable, sortAccountsByPriority } = require('../../utils/commonHelper')
@@ -244,6 +245,11 @@ class UnifiedOpenAIScheduler {
             logger.info(
               `🎯 Using bound dedicated ${accountType} account: ${boundAccount.name} (${boundAccount.id}) for API key ${apiKeyData.name}`
             )
+            await resourceVisibilityService.assertCanUseAccount(
+              apiKeyData.userId,
+              accountType,
+              boundAccount.id
+            )
             // 更新账户的最后使用时间
             await this.updateAccountLastUsed(boundAccount.id, accountType)
             return {
@@ -281,7 +287,12 @@ class UnifiedOpenAIScheduler {
             mappedAccount.accountId,
             mappedAccount.accountType
           )
-          if (isAvailable) {
+          const isVisible = await resourceVisibilityService.canUseAccount(
+            apiKeyData.userId,
+            mappedAccount.accountType,
+            mappedAccount.accountId
+          )
+          if (isAvailable && isVisible) {
             // 🚀 智能会话续期（续期 unified 映射键，按配置）
             await this._extendSessionMappingTTL(sessionHash)
             logger.info(
@@ -513,6 +524,13 @@ class UnifiedOpenAIScheduler {
           lastUsedAt: account.lastUsedAt || '0'
         })
       }
+    }
+
+    if (apiKeyData?.userId) {
+      return await resourceVisibilityService.filterVisibleAccountSelections(
+        apiKeyData.userId,
+        availableAccounts
+      )
     }
 
     return availableAccounts
@@ -815,7 +833,7 @@ class UnifiedOpenAIScheduler {
   }
 
   // 👥 从分组中选择账户
-  async selectAccountFromGroup(groupId, sessionHash = null, requestedModel = null) {
+  async selectAccountFromGroup(groupId, sessionHash = null, requestedModel = null, apiKeyData = null) {
     try {
       // 获取分组信息
       const group = await accountGroupService.getGroup(groupId)
@@ -830,6 +848,7 @@ class UnifiedOpenAIScheduler {
         error.statusCode = 400 // Bad Request - 请求参数错误
         throw error
       }
+      await resourceVisibilityService.assertCanUseAccountGroup(apiKeyData?.userId, group)
 
       logger.info(`👥 Selecting account from OpenAI group: ${group.name}`)
 
@@ -844,7 +863,12 @@ class UnifiedOpenAIScheduler {
               mappedAccount.accountId,
               mappedAccount.accountType
             )
-            if (isAvailable) {
+            const isVisible = await resourceVisibilityService.canUseAccount(
+              apiKeyData?.userId,
+              mappedAccount.accountType,
+              mappedAccount.accountId
+            )
+            if (isAvailable && isVisible) {
               // 🚀 智能会话续期（续期 unified 映射键，按配置）
               await this._extendSessionMappingTTL(sessionHash)
               logger.info(
@@ -954,8 +978,20 @@ class UnifiedOpenAIScheduler {
         throw error
       }
 
+      const visibleAccounts = apiKeyData?.userId
+        ? await resourceVisibilityService.filterVisibleAccountSelections(
+            apiKeyData.userId,
+            availableAccounts
+          )
+        : availableAccounts
+      if (visibleAccounts.length === 0) {
+        const error = new Error(`No visible accounts in group ${group.name}`)
+        error.statusCode = 403
+        throw error
+      }
+
       // 按优先级和最后使用时间排序（与 Claude/Gemini 调度保持一致）
-      const sortedAccounts = sortAccountsByPriority(availableAccounts)
+      const sortedAccounts = sortAccountsByPriority(visibleAccounts)
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]

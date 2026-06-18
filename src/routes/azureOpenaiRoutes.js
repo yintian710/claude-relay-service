@@ -5,6 +5,7 @@ const { authenticateApiKey } = require('../middleware/auth')
 const azureOpenaiAccountService = require('../services/account/azureOpenaiAccountService')
 const azureOpenaiRelayService = require('../services/relay/azureOpenaiRelayService')
 const apiKeyService = require('../services/apiKeyService')
+const resourceVisibilityService = require('../services/resourceVisibilityService')
 const crypto = require('crypto')
 const upstreamErrorHelper = require('../utils/upstreamErrorHelper')
 const { createRequestDetailMeta } = require('../utils/requestDetailHelper')
@@ -173,9 +174,14 @@ router.post('/chat/completions', authenticateApiKey, async (req, res) => {
   try {
     // 获取绑定的 Azure OpenAI 账户
     let account = null
-    if (req.apiKey?.azureOpenaiAccountId) {
+    if (req.apiKey?.azureOpenaiAccountId && !req.apiKey.azureOpenaiAccountId.startsWith('group:')) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
       if (account) {
+        await resourceVisibilityService.assertCanUseAccount(
+          req.apiKey.userId,
+          'azure-openai',
+          account.id
+        )
         const isTempUnavailable = await upstreamErrorHelper.isTempUnavailable(
           account.id,
           'azure-openai'
@@ -192,7 +198,7 @@ router.post('/chat/completions', authenticateApiKey, async (req, res) => {
 
     // 如果没有绑定账户或账户不可用，选择一个可用账户
     if (!account || account.isActive !== 'true') {
-      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId)
+      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId, req.apiKey)
     }
 
     // 发送请求到 Azure OpenAI
@@ -273,7 +279,7 @@ router.post('/chat/completions', authenticateApiKey, async (req, res) => {
     logger.error(`Azure OpenAI request failed ${requestId}:`, error)
 
     if (!res.headersSent) {
-      const statusCode = error.response?.status || 500
+      const statusCode = error.statusCode || error.response?.status || 500
       const errorMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
 
@@ -304,9 +310,14 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
   try {
     // 获取绑定的 Azure OpenAI 账户
     let account = null
-    if (req.apiKey?.azureOpenaiAccountId) {
+    if (req.apiKey?.azureOpenaiAccountId && !req.apiKey.azureOpenaiAccountId.startsWith('group:')) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
       if (account) {
+        await resourceVisibilityService.assertCanUseAccount(
+          req.apiKey.userId,
+          'azure-openai',
+          account.id
+        )
         const isTempUnavailable = await upstreamErrorHelper.isTempUnavailable(
           account.id,
           'azure-openai'
@@ -323,7 +334,7 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
 
     // 如果没有绑定账户或账户不可用，选择一个可用账户
     if (!account || account.isActive !== 'true') {
-      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId)
+      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId, req.apiKey)
     }
 
     // 发送请求到 Azure OpenAI
@@ -404,7 +415,7 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     logger.error(`Azure OpenAI responses request failed ${requestId}:`, error)
 
     if (!res.headersSent) {
-      const statusCode = error.response?.status || 500
+      const statusCode = error.statusCode || error.response?.status || 500
       const errorMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
 
@@ -434,9 +445,14 @@ router.post('/embeddings', authenticateApiKey, async (req, res) => {
   try {
     // 获取绑定的 Azure OpenAI 账户
     let account = null
-    if (req.apiKey?.azureOpenaiAccountId) {
+    if (req.apiKey?.azureOpenaiAccountId && !req.apiKey.azureOpenaiAccountId.startsWith('group:')) {
       account = await azureOpenaiAccountService.getAccount(req.apiKey.azureOpenaiAccountId)
       if (account) {
+        await resourceVisibilityService.assertCanUseAccount(
+          req.apiKey.userId,
+          'azure-openai',
+          account.id
+        )
         const isTempUnavailable = await upstreamErrorHelper.isTempUnavailable(
           account.id,
           'azure-openai'
@@ -453,7 +469,7 @@ router.post('/embeddings', authenticateApiKey, async (req, res) => {
 
     // 如果没有绑定账户或账户不可用，选择一个可用账户
     if (!account || account.isActive !== 'true') {
-      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId)
+      account = await azureOpenaiAccountService.selectAvailableAccount(sessionId, req.apiKey)
     }
 
     // 发送请求到 Azure OpenAI
@@ -508,7 +524,7 @@ router.post('/embeddings', authenticateApiKey, async (req, res) => {
     logger.error(`Azure OpenAI embeddings request failed ${requestId}:`, error)
 
     if (!res.headersSent) {
-      const statusCode = error.response?.status || 500
+      const statusCode = error.statusCode || error.response?.status || 500
       const errorMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
 

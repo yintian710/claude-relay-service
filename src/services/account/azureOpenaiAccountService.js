@@ -4,6 +4,8 @@ const crypto = require('crypto')
 const config = require('../../../config/config')
 const logger = require('../../utils/logger')
 const upstreamErrorHelper = require('../../utils/upstreamErrorHelper')
+const resourceVisibilityService = require('../resourceVisibilityService')
+const accountGroupService = require('../accountGroupService')
 
 // 加密相关常量
 const ALGORITHM = 'aes-256-cbc'
@@ -383,7 +385,39 @@ function isSubscriptionExpired(account) {
 }
 
 // 选择可用账户
-async function selectAvailableAccount(sessionId = null) {
+async function selectAvailableAccount(sessionId = null, apiKeyData = null) {
+  const userId = apiKeyData?.userId || ''
+  const groupBinding = apiKeyData?.azureOpenaiAccountId?.startsWith('group:')
+    ? apiKeyData.azureOpenaiAccountId.slice('group:'.length)
+    : ''
+  let scopedAccounts = null
+
+  if (groupBinding) {
+    const group = await accountGroupService.getGroup(groupBinding)
+    await resourceVisibilityService.assertCanUseAccountGroup(userId, group)
+    if (group?.platform !== 'openai') {
+      const error = new Error(`Group ${group?.name || groupBinding} is not an OpenAI group`)
+      error.statusCode = 400
+      throw error
+    }
+
+    const memberIds = await accountGroupService.getGroupMembers(groupBinding)
+    scopedAccounts = []
+    for (const accountId of memberIds) {
+      const account = await getAccount(accountId)
+      if (account) {
+        scopedAccounts.push(account)
+      }
+    }
+    scopedAccounts = userId
+      ? await resourceVisibilityService.filterVisibleAccounts(
+          userId,
+          scopedAccounts,
+          'azure-openai'
+        )
+      : scopedAccounts
+  }
+
   // 如果有会话ID，尝试获取之前分配的账户
   if (sessionId) {
     const client = redisClient.getClientSafe()
@@ -392,7 +426,20 @@ async function selectAvailableAccount(sessionId = null) {
 
     if (accountId) {
       const account = await getAccount(accountId)
-      if (account && account.isActive === 'true' && account.schedulable === 'true') {
+      const isInScope =
+        !scopedAccounts || scopedAccounts.some((candidate) => candidate.id === accountId)
+      const isVisible = await resourceVisibilityService.canUseAccount(
+        userId,
+        'azure-openai',
+        accountId
+      )
+      if (
+        account &&
+        account.isActive === 'true' &&
+        account.schedulable === 'true' &&
+        isVisible &&
+        isInScope
+      ) {
         const isTempUnavail = await upstreamErrorHelper.isTempUnavailable(accountId, 'azure-openai')
         if (!isTempUnavail) {
           logger.debug(`Reusing Azure OpenAI account ${accountId} for session ${sessionId}`)
@@ -405,8 +452,15 @@ async function selectAvailableAccount(sessionId = null) {
     }
   }
 
-  // 获取所有共享账户
-  const sharedAccounts = await getSharedAccounts()
+  // 获取所有共享账户，或绑定使用分组内的 Azure 账户
+  const candidateAccounts = scopedAccounts || (await getSharedAccounts())
+  const sharedAccounts = userId && !scopedAccounts
+    ? await resourceVisibilityService.filterVisibleAccounts(
+        userId,
+        candidateAccounts,
+        'azure-openai'
+      )
+    : candidateAccounts
 
   // 过滤出可用的账户（异步过滤，包含临时不可用检查）
   const availableAccounts = []

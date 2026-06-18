@@ -1,5 +1,6 @@
 const redis = require('../models/redis')
 const crypto = require('crypto')
+const bcrypt = require('bcryptjs')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 
@@ -8,6 +9,7 @@ class UserService {
     this.userPrefix = 'user:'
     this.usernamePrefix = 'username:'
     this.userSessionPrefix = 'user_session:'
+    this.userPasswordPrefix = 'user_password:'
   }
 
   // 🔑 生成用户ID
@@ -51,6 +53,7 @@ class UserService {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           lastLoginAt: null,
+          authProvider: 'ldap',
           apiKeyCount: 0,
           totalUsage: {
             requests: 0,
@@ -67,6 +70,7 @@ class UserService {
           displayName,
           firstName,
           lastName,
+          authProvider: user.authProvider || 'ldap',
           updatedAt: new Date().toISOString()
         }
       }
@@ -86,6 +90,162 @@ class UserService {
     } catch (error) {
       logger.error('❌ Error creating/updating user:', error)
       throw error
+    }
+  }
+
+  // 👤 创建本地密码用户
+  async createLocalUser(userData) {
+    try {
+      const {
+        username,
+        password,
+        email = '',
+        displayName = username,
+        firstName = '',
+        lastName = '',
+        role = config.userManagement.defaultUserRole,
+        isActive = true
+      } = userData
+
+      const existingUser = await this.getUserByUsername(username)
+      if (existingUser) {
+        const error = new Error('User already exists')
+        error.statusCode = 409
+        throw error
+      }
+
+      const userId = this.generateUserId()
+      const now = new Date().toISOString()
+      const user = {
+        id: userId,
+        username,
+        email,
+        displayName,
+        firstName,
+        lastName,
+        role,
+        isActive,
+        authProvider: 'local',
+        createdAt: now,
+        updatedAt: now,
+        lastLoginAt: null,
+        passwordUpdatedAt: now,
+        apiKeyCount: 0,
+        totalUsage: {
+          requests: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          totalCost: 0
+        }
+      }
+
+      await redis.set(`${this.userPrefix}${user.id}`, JSON.stringify(user))
+      await redis.set(`${this.usernamePrefix}${username}`, user.id)
+      await redis.addToIndex('user:index', user.id)
+      await this.updateLocalUserPassword(user.id, password, { invalidateSessions: false })
+
+      await this.transferMatchingApiKeys(user)
+
+      logger.info(`👤 Created local user: ${username} (${user.id})`)
+      return user
+    } catch (error) {
+      logger.error('❌ Error creating local user:', error)
+      throw error
+    }
+  }
+
+  // 🔐 更新本地用户密码
+  async updateLocalUserPassword(userId, password, options = {}) {
+    try {
+      const { invalidateSessions = true } = options
+      const user = await this.getUserById(userId, false)
+      if (!user) {
+        const error = new Error('User not found')
+        error.statusCode = 404
+        throw error
+      }
+
+      const rounds = Math.max(parseInt(config.userManagement.localPasswordBcryptRounds) || 12, 10)
+      const passwordHash = await bcrypt.hash(password, rounds)
+      const now = new Date().toISOString()
+
+      user.authProvider = 'local'
+      user.passwordUpdatedAt = now
+      user.updatedAt = now
+
+      await redis.set(`${this.userPrefix}${userId}`, JSON.stringify(user))
+      await redis.set(`${this.userPasswordPrefix}${userId}`, passwordHash)
+
+      if (invalidateSessions) {
+        await this.invalidateUserSessions(userId)
+      }
+
+      logger.info(`🔐 Updated local password for user: ${user.username} (${userId})`)
+      return user
+    } catch (error) {
+      logger.error('❌ Error updating local user password:', error)
+      throw error
+    }
+  }
+
+  // 🔐 本地用户名密码认证
+  async authenticateLocalUserCredentials(username, password) {
+    try {
+      let user = await this.getUserByUsername(username)
+      if (!user) {
+        if (!config.userManagement.localAuthAutoCreateUsers) {
+          logger.info(`🚫 Local login user not found: ${username}`)
+          return { success: false, message: 'Invalid username or password' }
+        }
+
+        user = await this.createLocalUser({
+          username,
+          password,
+          displayName: username,
+          role: config.userManagement.defaultUserRole,
+          isActive: true
+        })
+        logger.info(`👤 Auto-created local user on first login: ${username} (${user.id})`)
+      }
+
+      if (!user.isActive) {
+        logger.security(`🔒 Disabled user local login attempt: ${username}`)
+        return { success: false, message: 'Account is disabled' }
+      }
+
+      let passwordHash = await redis.get(`${this.userPasswordPrefix}${user.id}`)
+      if (!passwordHash) {
+        if (!config.userManagement.localAuthAutoCreateUsers) {
+          logger.info(`🚫 Local login user has no password: ${username}`)
+          return { success: false, message: 'Invalid username or password' }
+        }
+
+        // Local auto-create mode also bootstraps existing SSO/LDAP users that have no local password yet.
+        user = await this.updateLocalUserPassword(user.id, password, { invalidateSessions: false })
+        passwordHash = await redis.get(`${this.userPasswordPrefix}${user.id}`)
+        logger.info(`🔐 Initialized local password for existing user: ${username} (${user.id})`)
+      }
+
+      const validPassword = await bcrypt.compare(password, passwordHash)
+      if (!validPassword) {
+        logger.info(`🚫 Local login invalid password: ${username}`)
+        return { success: false, message: 'Invalid username or password' }
+      }
+
+      await this.recordUserLogin(user.id)
+      const sessionToken = await this.createUserSession(user.id, { authProvider: 'local' })
+      const freshUser = await this.getUserById(user.id, false)
+
+      logger.info(`✅ Local authentication successful for user: ${username}`)
+      return {
+        success: true,
+        user: freshUser,
+        sessionToken,
+        message: 'Authentication successful'
+      }
+    } catch (error) {
+      logger.error('❌ Local authentication error:', error)
+      return { success: false, message: 'Authentication failed' }
     }
   }
 

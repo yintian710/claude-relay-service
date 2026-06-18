@@ -8,7 +8,14 @@
           Manage users, their API keys, and view usage statistics
         </p>
       </div>
-      <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
+      <div class="mt-4 flex gap-2 sm:ml-16 sm:mt-0 sm:flex-none">
+        <button
+          class="inline-flex items-center justify-center rounded-md border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:opacity-50 sm:w-auto"
+          :disabled="loading"
+          @click="openCreateUserModal"
+        >
+          Create Local User
+        </button>
         <button
           class="inline-flex items-center justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 sm:w-auto"
           :disabled="loading"
@@ -311,6 +318,11 @@
                     >
                       {{ user.role }}
                     </span>
+                    <span
+                      class="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                    >
+                      {{ user.authProvider || 'ldap' }}
+                    </span>
                   </div>
                 </div>
                 <div
@@ -417,6 +429,22 @@
                   />
                 </svg>
               </button>
+
+              <!-- Reset Local Password -->
+              <button
+                class="inline-flex items-center rounded border border-transparent p-1 text-gray-400 hover:text-green-600"
+                title="Reset Local Password"
+                @click="openResetPasswordModal(user)"
+              >
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    d="M15 7a2 2 0 012 2m0 0a2 2 0 012 2m-2-2h-6m6 0v6a2 2 0 01-2 2H9a2 2 0 01-2-2V9a2 2 0 012-2h6z"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                  />
+                </svg>
+              </button>
             </div>
           </div>
         </li>
@@ -471,11 +499,137 @@
       @close="showRoleModal = false"
       @updated="handleUserUpdated"
     />
+
+    <!-- Create Local User Modal -->
+    <div
+      v-if="showCreateUserModal"
+      class="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
+    >
+      <div class="relative top-20 mx-auto w-full max-w-lg rounded-md bg-white p-5 shadow-lg">
+        <div class="mb-4 flex items-center justify-between">
+          <h3 class="text-lg font-medium text-gray-900">Create Local User</h3>
+          <button class="text-gray-400 hover:text-gray-600" @click="showCreateUserModal = false">
+            x
+          </button>
+        </div>
+        <form class="space-y-4" @submit.prevent="createLocalUser">
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium text-gray-700">Username *</span>
+              <input
+                v-model="createUserForm.username"
+                class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                required
+              />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium text-gray-700">Password *</span>
+              <input
+                v-model="createUserForm.password"
+                class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                minlength="8"
+                required
+                type="password"
+              />
+            </label>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium text-gray-700">Display Name</span>
+              <input
+                v-model="createUserForm.displayName"
+                class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+              />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium text-gray-700">Email</span>
+              <input
+                v-model="createUserForm.email"
+                class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+                type="email"
+              />
+            </label>
+          </div>
+          <label class="block">
+            <span class="text-sm font-medium text-gray-700">Role</span>
+            <select
+              v-model="createUserForm.role"
+              class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+            >
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </label>
+          <div class="flex justify-end gap-3 pt-2">
+            <button
+              class="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              type="button"
+              @click="showCreateUserModal = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              :disabled="savingUser"
+              type="submit"
+            >
+              {{ savingUser ? 'Creating...' : 'Create User' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Reset Password Modal -->
+    <div
+      v-if="showPasswordModal"
+      class="fixed inset-0 z-50 h-full w-full overflow-y-auto bg-gray-600 bg-opacity-50"
+    >
+      <div class="relative top-24 mx-auto w-full max-w-md rounded-md bg-white p-5 shadow-lg">
+        <div class="mb-4 flex items-center justify-between">
+          <h3 class="text-lg font-medium text-gray-900">Reset Local Password</h3>
+          <button class="text-gray-400 hover:text-gray-600" @click="showPasswordModal = false">
+            x
+          </button>
+        </div>
+        <form class="space-y-4" @submit.prevent="resetLocalPassword">
+          <p class="text-sm text-gray-600">
+            User: <span class="font-medium">{{ selectedUser?.username }}</span>
+          </p>
+          <label class="block">
+            <span class="text-sm font-medium text-gray-700">New Password *</span>
+            <input
+              v-model="passwordForm.password"
+              class="mt-1 block w-full rounded-md border-gray-300 text-sm"
+              minlength="8"
+              required
+              type="password"
+            />
+          </label>
+          <div class="flex justify-end gap-3 pt-2">
+            <button
+              class="rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+              type="button"
+              @click="showPasswordModal = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              :disabled="savingPassword"
+              type="submit"
+            >
+              {{ savingPassword ? 'Saving...' : 'Reset Password' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, reactive } from 'vue'
 
 import * as httpApis from '@/utils/http_apis'
 import { showToast, formatNumber, formatDate } from '@/utils/tools'
@@ -494,7 +648,23 @@ const selectedStatus = ref('')
 const showStatsModal = ref(false)
 const showConfirmModal = ref(false)
 const showRoleModal = ref(false)
+const showCreateUserModal = ref(false)
+const showPasswordModal = ref(false)
 const selectedUser = ref(null)
+const savingUser = ref(false)
+const savingPassword = ref(false)
+
+const createUserForm = reactive({
+  username: '',
+  password: '',
+  displayName: '',
+  email: '',
+  role: 'user'
+})
+
+const passwordForm = reactive({
+  password: ''
+})
 
 const confirmAction = ref({
   title: '',
@@ -604,6 +774,72 @@ const disableUserApiKeys = (user) => {
 const changeUserRole = (user) => {
   selectedUser.value = user
   showRoleModal.value = true
+}
+
+const resetCreateUserForm = () => {
+  createUserForm.username = ''
+  createUserForm.password = ''
+  createUserForm.displayName = ''
+  createUserForm.email = ''
+  createUserForm.role = 'user'
+}
+
+const openCreateUserModal = () => {
+  resetCreateUserForm()
+  showCreateUserModal.value = true
+}
+
+const createLocalUser = async () => {
+  savingUser.value = true
+  try {
+    const response = await httpApis.createFrontUserApi({
+      username: createUserForm.username.trim(),
+      password: createUserForm.password,
+      displayName: createUserForm.displayName.trim() || undefined,
+      email: createUserForm.email.trim() || undefined,
+      role: createUserForm.role
+    })
+
+    if (response.success) {
+      showToast('Local user created', 'success')
+      showCreateUserModal.value = false
+      await loadUsers()
+    }
+  } catch (error) {
+    console.error('Failed to create local user:', error)
+    showToast(error.response?.data?.message || 'Failed to create local user', 'error')
+  } finally {
+    savingUser.value = false
+  }
+}
+
+const openResetPasswordModal = (user) => {
+  selectedUser.value = user
+  passwordForm.password = ''
+  showPasswordModal.value = true
+}
+
+const resetLocalPassword = async () => {
+  if (!selectedUser.value) return
+
+  savingPassword.value = true
+  try {
+    const response = await httpApis.updateFrontUserPasswordApi(selectedUser.value.id, {
+      password: passwordForm.password
+    })
+
+    if (response.success) {
+      showToast('Password reset successfully', 'success')
+      showPasswordModal.value = false
+      selectedUser.value = null
+      await loadUsers()
+    }
+  } catch (error) {
+    console.error('Failed to reset local password:', error)
+    showToast(error.response?.data?.message || 'Failed to reset password', 'error')
+  } finally {
+    savingPassword.value = false
+  }
 }
 
 const handleConfirmAction = async () => {

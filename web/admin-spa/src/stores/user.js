@@ -171,6 +171,66 @@ export const useUserStore = defineStore('user', {
       }
     },
 
+    async getVisibleAccounts(params = {}) {
+      const response = await axios.get(`${API_BASE}/accounts`, { params })
+      return response.data.success ? response.data.data || {} : {}
+    },
+
+    async createAccount(accountType, accountData) {
+      const response = await axios.post(`${API_BASE}/accounts/${accountType}`, accountData)
+      return response.data
+    },
+
+    async getAccountGroups(params = {}) {
+      const response = await axios.get(`${API_BASE}/account-groups`, { params })
+      return response.data.success ? response.data.data || [] : []
+    },
+
+    async createAccountGroup(data) {
+      const response = await axios.post(`${API_BASE}/account-groups`, data)
+      return response.data
+    },
+
+    async addAccountGroupMember(groupId, data) {
+      const response = await axios.post(`${API_BASE}/account-groups/${groupId}/members`, data)
+      return response.data
+    },
+
+    async deleteAccountGroup(groupId) {
+      const response = await axios.delete(`${API_BASE}/account-groups/${groupId}`)
+      return response.data
+    },
+
+    async getPermissionGroups() {
+      const response = await axios.get(`${API_BASE}/permission-groups`)
+      return response.data.success ? response.data.data || [] : []
+    },
+
+    async createPermissionGroup(data) {
+      const response = await axios.post(`${API_BASE}/permission-groups`, data)
+      return response.data
+    },
+
+    async getPermissionGroupMembers(groupId) {
+      const response = await axios.get(`${API_BASE}/permission-groups/${groupId}/members`)
+      return response.data.success ? response.data.data || [] : []
+    },
+
+    async addPermissionGroupMember(groupId, data) {
+      const response = await axios.post(`${API_BASE}/permission-groups/${groupId}/members`, data)
+      return response.data
+    },
+
+    async getPermissionGroupAccounts(groupId) {
+      const response = await axios.get(`${API_BASE}/permission-groups/${groupId}/accounts`)
+      return response.data.success ? response.data.data || [] : []
+    },
+
+    async addPermissionGroupAccount(groupId, data) {
+      const response = await axios.post(`${API_BASE}/permission-groups/${groupId}/accounts`, data)
+      return response.data
+    },
+
     // 🧹 清除认证信息
     clearAuth() {
       this.user = null

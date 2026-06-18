@@ -34,7 +34,37 @@
           v-else-if="oemLoading"
           class="mx-auto mb-2 h-8 w-48 animate-pulse rounded bg-gray-300/50 sm:h-9 sm:w-64"
         />
-        <p class="text-base text-gray-600 dark:text-gray-400 sm:text-lg">管理后台</p>
+        <p class="text-base text-gray-600 dark:text-gray-400 sm:text-lg">
+          {{ isUserMode ? '用户控制台' : '管理后台' }}
+        </p>
+        <div
+          class="mt-4 grid grid-cols-2 rounded-xl border border-gray-300/30 bg-white/30 p-1 text-sm dark:bg-gray-800/30"
+        >
+          <button
+            :class="[
+              'rounded-lg px-3 py-2 font-medium transition-colors',
+              !isUserMode
+                ? 'bg-white text-blue-700 shadow dark:bg-gray-700 dark:text-blue-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+            type="button"
+            @click="switchLoginMode('admin')"
+          >
+            管理员
+          </button>
+          <button
+            :class="[
+              'rounded-lg px-3 py-2 font-medium transition-colors',
+              isUserMode
+                ? 'bg-white text-blue-700 shadow dark:bg-gray-700 dark:text-blue-300'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+            type="button"
+            @click="switchLoginMode('user')"
+          >
+            普通用户
+          </button>
+        </div>
       </div>
 
       <form class="space-y-4 sm:space-y-6" @submit.prevent="handleLogin">
@@ -42,7 +72,7 @@
           <label
             class="mb-2 block text-sm font-semibold text-gray-900 dark:text-gray-100 sm:mb-3"
             for="username"
-            >用户名</label
+            >{{ isUserMode ? '普通用户用户名' : '管理员用户名' }}</label
           >
           <input
             id="username"
@@ -50,7 +80,7 @@
             autocomplete="username"
             class="form-input w-full"
             name="username"
-            placeholder="请输入用户名"
+            :placeholder="isUserMode ? '请输入普通用户用户名' : '请输入管理员用户名'"
             required
             type="text"
           />
@@ -76,39 +106,58 @@
 
         <button
           class="btn btn-primary w-full px-4 py-3 text-base font-semibold sm:px-6 sm:py-4 sm:text-lg"
-          :disabled="authStore.loginLoading"
+          :disabled="loginLoading"
           type="submit"
         >
-          <i v-if="!authStore.loginLoading" class="fas fa-sign-in-alt mr-2" />
-          <div v-if="authStore.loginLoading" class="loading-spinner mr-2" />
-          {{ authStore.loginLoading ? '登录中...' : '登录' }}
+          <i v-if="!loginLoading" class="fas fa-sign-in-alt mr-2" />
+          <div v-if="loginLoading" class="loading-spinner mr-2" />
+          {{
+            loginLoading ? '登录中...' : isUserMode ? '普通用户登录 / 首次自动注册' : '管理员登录'
+          }}
         </button>
       </form>
 
       <div
-        v-if="authStore.loginError"
+        v-if="loginError"
         class="mt-4 rounded-lg border border-red-500/30 bg-red-500/20 p-3 text-center text-xs text-red-800 backdrop-blur-sm dark:text-red-400 sm:mt-6 sm:rounded-xl sm:p-4 sm:text-sm"
       >
-        <i class="fas fa-exclamation-triangle mr-2" />{{ authStore.loginError }}
+        <i class="fas fa-exclamation-triangle mr-2" />{{ loginError }}
+      </div>
+
+      <div
+        v-if="isUserMode"
+        class="mt-4 text-center text-xs text-gray-600 dark:text-gray-400 sm:text-sm"
+      >
+        首次使用时输入用户名和密码即可自动创建普通用户。
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useUserStore } from '@/stores/user'
 import { useThemeStore } from '@/stores/theme'
 import ThemeToggle from '@/components/common/ThemeToggle.vue'
 
 const authStore = useAuthStore()
+const userStore = useUserStore()
 const themeStore = useThemeStore()
+const route = useRoute()
+const router = useRouter()
 const oemLoading = computed(() => authStore.oemLoading)
+const userLoginError = ref('')
 
 const loginForm = ref({
   username: '',
   password: ''
 })
+
+const isUserMode = computed(() => route.path === '/user-login' || route.query.mode === 'user')
+const loginLoading = computed(() => (isUserMode.value ? userStore.loading : authStore.loginLoading))
+const loginError = computed(() => (isUserMode.value ? userLoginError.value : authStore.loginError))
 
 onMounted(() => {
   // 初始化主题
@@ -117,7 +166,35 @@ onMounted(() => {
   authStore.loadOemSettings()
 })
 
+watch(
+  () => isUserMode.value,
+  () => {
+    userLoginError.value = ''
+    authStore.loginError = ''
+  }
+)
+
+const switchLoginMode = (mode) => {
+  userLoginError.value = ''
+  authStore.loginError = ''
+  router.replace(mode === 'user' ? '/user-login' : '/login')
+}
+
 const handleLogin = async () => {
+  userLoginError.value = ''
+  authStore.loginError = ''
+
+  if (isUserMode.value) {
+    try {
+      await userStore.login(loginForm.value)
+      await router.push('/dashboard')
+    } catch (error) {
+      userLoginError.value =
+        error.response?.data?.message || error.message || '登录失败，请检查用户名和密码'
+    }
+    return
+  }
+
   await authStore.login(loginForm.value)
 }
 </script>
