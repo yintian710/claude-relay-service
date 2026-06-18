@@ -1031,6 +1031,100 @@ restart_service() {
     return 1
 }
 
+# 更新 .env 中的单个配置项（保留其它配置，如 JWT_SECRET、ENCRYPTION_KEY）
+update_env_var() {
+    local key="$1"
+    local value="$2"
+    local env_file="$APP_DIR/.env"
+
+    [ -f "$env_file" ] || touch "$env_file"
+
+    local tmp_file
+    tmp_file=$(mktemp)
+    # 删除已存在的同名配置行，再追加新值
+    grep -v "^${key}=" "$env_file" > "$tmp_file" 2>/dev/null || true
+    echo "${key}=${value}" >> "$tmp_file"
+    mv "$tmp_file" "$env_file"
+}
+
+# 重新初始化配置
+reinit_config() {
+    if ! check_installation; then
+        print_error "服务未安装，请先运行: $0 install"
+        return 1
+    fi
+
+    cd "$APP_DIR"
+
+    print_warning "重新初始化将重新生成管理员账号密码（data/init.json）"
+    echo "  - 原有的管理员凭据将失效，请使用新生成的账号登录"
+    echo "  - 原 init.json 会自动备份"
+    echo "  - 可选择重新配置 Redis 连接信息"
+    echo "  - JWT 密钥与加密密钥（ENCRYPTION_KEY）将保留，避免已加密数据无法解密"
+    echo ""
+    echo -n "确定要重新初始化配置吗？(y/N): "
+    read -n 1 confirm
+    echo
+
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        print_info "已取消重新初始化"
+        return 0
+    fi
+
+    # 备份当前 .env，便于出错时恢复
+    if [ -f ".env" ]; then
+        cp .env ".env.backup.$(date +%Y%m%d%H%M%S)"
+    fi
+
+    # 可选：重新配置 Redis 连接
+    echo ""
+    echo -n "是否重新配置 Redis 连接信息？(y/N): "
+    read -n 1 reconfig_redis
+    echo
+    if [[ "$reconfig_redis" =~ ^[Yy]$ ]]; then
+        # check_redis 会交互式询问 REDIS_HOST/PORT/PASSWORD 并测试连接
+        if ! check_redis; then
+            print_warning "Redis 连接测试未通过，仍按输入的配置写入 .env"
+        fi
+        update_env_var "REDIS_HOST" "$REDIS_HOST"
+        update_env_var "REDIS_PORT" "$REDIS_PORT"
+        update_env_var "REDIS_PASSWORD" "$REDIS_PASSWORD"
+        print_success "Redis 配置已更新到 .env"
+    fi
+
+    # 备份现有的 init.json（setup 在 init.json 存在时不会重新生成凭据）
+    if [ -f "data/init.json" ]; then
+        local backup_file="data/init.json.backup.$(date +%Y%m%d%H%M%S)"
+        if mv "data/init.json" "$backup_file"; then
+            print_info "已备份原配置到: $backup_file"
+        else
+            print_error "备份 init.json 失败，已中止"
+            return 1
+        fi
+    fi
+
+    # 重新运行初始化（重新生成管理员凭据）
+    print_info "正在重新初始化..."
+    if ! npm run setup; then
+        print_error "重新初始化失败"
+        return 1
+    fi
+
+    print_success "重新初始化完成！"
+    print_warning "请使用上面生成的新管理员凭据登录，重启服务后生效"
+
+    # 若服务正在运行，提示并自动重启
+    if pgrep -f "node.*src/app.js" > /dev/null; then
+        echo ""
+        echo -n "检测到服务正在运行，是否立即重启以生效？(y/N): "
+        read -n 1 restart_now
+        echo
+        if [[ "$restart_now" =~ ^[Yy]$ ]]; then
+            restart_service
+        fi
+    fi
+}
+
 # 更新模型价格
 update_model_pricing() {
     if ! check_installation; then
@@ -1396,6 +1490,7 @@ show_help() {
     echo "  status         - 查看状态"
     echo "  switch-branch  - 切换分支"
     echo "  update-pricing - 更新模型价格数据"
+    echo "  reinit         - 重新初始化配置（重新生成管理员凭据）"
     echo "  symlink        - 创建 crs 快捷命令"
     echo "  help           - 显示帮助"
     echo ""
@@ -1474,10 +1569,11 @@ show_menu() {
         echo "  5) 更新服务"
         echo "  6) 切换分支"
         echo "  7) 更新模型价格"
-        echo "  8) 卸载服务"
-        echo "  9) 退出"
+        echo "  8) 重新初始化配置"
+        echo "  9) 卸载服务"
+        echo "  10) 退出"
         echo ""
-        echo -n "请输入选项 [1-9]: "
+        echo -n "请输入选项 [1-10]: "
     fi
 }
 
@@ -1577,12 +1673,18 @@ handle_menu_choice() {
                 ;;
             8)
                 echo ""
+                reinit_config
+                echo -n "按回车键继续..."
+                read
+                ;;
+            9)
+                echo ""
                 uninstall_service
                 if [ $? -eq 0 ]; then
                     exit 0
                 fi
                 ;;
-            9)
+            10)
                 echo "退出管理工具"
                 exit 0
                 ;;
@@ -1817,6 +1919,9 @@ main() {
             ;;
         update-pricing)
             update_model_pricing
+            ;;
+        reinit)
+            reinit_config
             ;;
         symlink)
             # 单独创建软链接
